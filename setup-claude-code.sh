@@ -79,36 +79,37 @@ detect_existing_installation() {
     local found=false
     local install_paths=""
     
-    # Check if claude exists in PATH
-    if command -v claude >/dev/null 2>&1; then
+    # Check if claude exists in PATH (use type instead of command -v for speed)
+    if type claude >/dev/null 2>&1; then
         found=true
-        local claude_path
-        claude_path=$(command -v claude 2>/dev/null)
-        install_paths="  - Claude binary: $claude_path"
+        install_paths="  - Claude binary: $(type -P claude 2>/dev/null || echo 'in PATH')"
     fi
     
-    # Check for npm global installation (avoid npm list which can hang on WSL)
-    # Just check common npm global paths directly
-    local npm_global_paths=(
-        "$(npm config get prefix 2>/dev/null)/lib/node_modules/@anthropic-ai/claude-code"
-        "$HOME/.local/lib/node_modules/@anthropic-ai/claude-code"
-        "/usr/local/lib/node_modules/@anthropic-ai/claude-code"
-        "/usr/lib/node_modules/@anthropic-ai/claude-code"
-    )
+    # Check for npm global installation - use only direct path checks, no npm commands
+    # Get home directory for path construction
+    local home_dir="$HOME"
     
-    for npm_path in "${npm_global_paths[@]}"; do
-        if [ -d "$npm_path" ] 2>/dev/null; then
-            found=true
-            install_paths="$install_paths
-  - npm global: $npm_path"
-            break
-        fi
-    done
+    # Check common npm global paths
+    if [ -d "$home_dir/.local/lib/node_modules/@anthropic-ai/claude-code" ]; then
+        found=true
+        install_paths="$install_paths
+  - npm global: $home_dir/.local/lib/node_modules/@anthropic-ai/claude-code"
+    elif [ -d "/usr/local/lib/node_modules/@anthropic-ai/claude-code" ]; then
+        found=true
+        install_paths="$install_paths
+  - npm global: /usr/local/lib/node_modules/@anthropic-ai/claude-code"
+    elif [ -d "/usr/lib/node_modules/@anthropic-ai/claude-code" ]; then
+        found=true
+        install_paths="$install_paths
+  - npm global: /usr/lib/node_modules/@anthropic-ai/claude-code"
+    fi
     
     # Check WSL Windows npm path
-    if [ -f /proc/version ] && grep -q "Microsoft" /proc/version 2>/dev/null; then
-        local win_npm_path="/mnt/c/Users/$(whoami)/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code"
-        if [ -d "$win_npm_path" ] 2>/dev/null; then
+    if [ -f /proc/version ] && grep -q Microsoft /proc/version 2>/dev/null; then
+        # Extract username from Windows path
+        local win_user="${USER:-$(whoami)}"
+        local win_npm_path="/mnt/c/Users/$win_user/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code"
+        if [ -d "$win_npm_path" ]; then
             found=true
             install_paths="$install_paths
   - Windows npm: $win_npm_path"
@@ -116,17 +117,17 @@ detect_existing_installation() {
     fi
     
     # Check ~/.claude directory
-    if [ -d "$HOME/.claude" ]; then
+    if [ -d "$home_dir/.claude" ]; then
         found=true
         install_paths="$install_paths
-  - Config directory: $HOME/.claude"
+  - Config directory: $home_dir/.claude"
     fi
     
     # Check ~/.claude.json
-    if [ -f "$HOME/.claude.json" ]; then
+    if [ -f "$home_dir/.claude.json" ]; then
         found=true
         install_paths="$install_paths
-  - Config file: $HOME/.claude.json"
+  - Config file: $home_dir/.claude.json"
     fi
     
     # Check .bashrc for configuration
@@ -155,14 +156,15 @@ uninstall_claude_code() {
     local existing
     existing=$(detect_existing_installation)
     
-    # Also check for npm global installation (avoid npm list which can hang on WSL)
+    # Also check for npm global installation (avoid all npm commands which can hang on WSL)
     local npm_global_claude=""
-    if command -v npm >/dev/null 2>&1; then
-        # Check common npm global paths directly instead of using npm list
-        local npm_prefix=$(npm config get prefix 2>/dev/null)
-        if [ -d "$npm_prefix/lib/node_modules/@anthropic-ai/claude-code" ] 2>/dev/null; then
-            npm_global_claude="npm: $npm_prefix/lib/node_modules/@anthropic-ai/claude-code"
-        fi
+    # Check common npm global paths directly
+    if [ -d "$HOME/.local/lib/node_modules/@anthropic-ai/claude-code" ]; then
+        npm_global_claude="npm: $HOME/.local/lib/node_modules/@anthropic-ai/claude-code"
+    elif [ -d "/usr/local/lib/node_modules/@anthropic-ai/claude-code" ]; then
+        npm_global_claude="npm: /usr/local/lib/node_modules/@anthropic-ai/claude-code"
+    elif [ -d "/usr/lib/node_modules/@anthropic-ai/claude-code" ]; then
+        npm_global_claude="npm: /usr/lib/node_modules/@anthropic-ai/claude-code"
     fi
     
     if [ -z "$existing" ] && [ -z "$npm_global_claude" ]; then
@@ -216,10 +218,16 @@ uninstall_claude_code() {
     # 2. Remove npm global installation if exists (Linux side)
     if [ -n "$npm_global_claude" ]; then
         log_info "Removing npm global installation of Claude Code..."
-        npm uninstall -g @anthropic-ai/claude-code 2>/dev/null || {
-            log_warn "Failed to remove npm global installation automatically"
-            log_info "You may need to run manually: npm uninstall -g @anthropic-ai/claude-code"
-        }
+        # Check if npm is available and not pointing to Windows
+        if type npm >/dev/null 2>&1 && ! which npm | grep -q "/mnt/c"; then
+            npm uninstall -g @anthropic-ai/claude-code 2>/dev/null || {
+                log_warn "Failed to remove npm global installation automatically"
+                log_info "You may need to run manually: npm uninstall -g @anthropic-ai/claude-code"
+            }
+        else
+            log_warn "npm not available or using Windows npm, skipping npm uninstall"
+            log_info "You may need to manually remove: $npm_global_claude"
+        fi
     fi
     
     # 2.5 Special handling for WSL Windows npm installations
@@ -230,11 +238,11 @@ uninstall_claude_code() {
             log_warn "Detected Windows npm installation at: $windows_npm_claude"
             log_info "Attempting to remove Windows npm installation..."
             
-            # Try to use Windows npm to uninstall
-            if command -v cmd.exe >/dev/null 2>&1; then
+            # Try to use Windows npm to uninstall (with timeout to prevent hanging)
+            if type cmd.exe >/dev/null 2>&1; then
                 log_info "Running: cmd.exe /C npm uninstall -g @anthropic-ai/claude-code"
-                cmd.exe /C "npm uninstall -g @anthropic-ai/claude-code" 2>/dev/null || {
-                    log_warn "Failed to uninstall via Windows npm"
+                timeout 10 cmd.exe /C "npm uninstall -g @anthropic-ai/claude-code" 2>/dev/null || {
+                    log_warn "Failed to uninstall via Windows npm (timed out or failed)"
                 }
             fi
             
