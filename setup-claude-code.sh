@@ -674,10 +674,8 @@ install_nodejs() {
         export NVM_DIR="$HOME/.nvm"
         [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
         
-        # Set mirror source
-        local npm_mirror
-        npm_mirror=$(select_fastest_npm_mirror)
-        export NVM_NODEJS_ORG_MIRROR="${npm_mirror/registry.npmmirror.com\/mirrors\/node}"
+        # Set Node.js mirror source for nvm (use npmmirror for Node.js binaries)
+        export NVM_NODEJS_ORG_MIRROR="https://npmmirror.com/mirrors/node/"
         
         # Try to install Node.js 20, fallback to lts if not available
         if ! nvm install 20 2>/dev/null; then
