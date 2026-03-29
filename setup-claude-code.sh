@@ -192,13 +192,49 @@ uninstall_claude_code() {
         fi
     fi
     
-    # 2. Remove npm global installation if exists
+    # 2. Remove npm global installation if exists (Linux side)
     if [ -n "$npm_global_claude" ]; then
         log_info "Removing npm global installation of Claude Code..."
         npm uninstall -g @anthropic-ai/claude-code 2>/dev/null || {
             log_warn "Failed to remove npm global installation automatically"
             log_info "You may need to run manually: npm uninstall -g @anthropic-ai/claude-code"
         }
+    fi
+    
+    # 2.5 Special handling for WSL Windows npm installations
+    if [ -f /proc/version ] && grep -q "Microsoft" /proc/version 2>/dev/null; then
+        # Check for Windows npm claude
+        local windows_npm_claude="/mnt/c/Users/$USER/AppData/Roaming/npm/claude"
+        if [ -f "$windows_npm_claude" ] || [ -L "$windows_npm_claude" ]; then
+            log_warn "Detected Windows npm installation at: $windows_npm_claude"
+            log_info "Attempting to remove Windows npm installation..."
+            
+            # Try to use Windows npm to uninstall
+            if command -v cmd.exe >/dev/null 2>&1; then
+                log_info "Running: cmd.exe /C npm uninstall -g @anthropic-ai/claude-code"
+                cmd.exe /C "npm uninstall -g @anthropic-ai/claude-code" 2>/dev/null || {
+                    log_warn "Failed to uninstall via Windows npm"
+                }
+            fi
+            
+            # Directly remove the files if npm uninstall failed
+            if [ -f "$windows_npm_claude" ] || [ -L "$windows_npm_claude" ]; then
+                log_info "Manually removing Windows npm files..."
+                rm -f "$windows_npm_claude" 2>/dev/null || true
+                rm -f "/mnt/c/Users/$USER/AppData/Roaming/npm/claude.cmd" 2>/dev/null || true
+                rm -rf "/mnt/c/Users/$USER/AppData/Roaming/npm/node_modules/@anthropic-ai" 2>/dev/null || true
+            fi
+            
+            log_ok "Windows npm installation removed"
+        fi
+        
+        # Also check for other common Windows npm paths
+        for win_path in "/mnt/c/Program Files/nodejs/claude" "/mnt/c/ProgramData/npm/claude"; do
+            if [ -f "$win_path" ] 2>/dev/null; then
+                log_warn "Found additional Windows installation at: $win_path"
+                rm -f "$win_path" 2>/dev/null || true
+            fi
+        done
     fi
     
     # 3. Remove wrapper alias from .bashrc
@@ -306,21 +342,49 @@ uninstall_claude_code() {
     echo "  3. Verify: which claude (should return nothing)"
     echo ""
     
+    # 9. For WSL: optionally fix PATH to remove Windows npm
+    if [ -f /proc/version ] && grep -q "Microsoft" /proc/version 2>/dev/null; then
+        if echo "$PATH" | grep -q "/mnt/c.*npm"; then
+            echo ""
+            read -p "Detected Windows npm in WSL PATH. Add automatic fix to .bashrc? [Y/n]: " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+                log_info "Adding PATH fix to .bashrc..."
+                cat >> "$BASHRC" << 'WSLFIX'
+
+# >>> WSL PATH FIX >>>
+# Remove Windows npm from PATH to avoid conflicts
+export PATH=$(echo "$PATH" | tr ':' '\n' | grep -v '/mnt/c.*npm' | tr '\n' ':')
+# <<< WSL PATH FIX <<<
+WSLFIX
+                log_ok "PATH fix added to .bashrc"
+            fi
+        fi
+    fi
+    
     # WSL specific warning
     if [ -f /proc/version ] && grep -q "Microsoft" /proc/version 2>/dev/null; then
         echo "============================================================================="
         echo "  WSL Environment Detected"
-    echo "============================================================================="
+        echo "============================================================================="
         echo ""
         echo "You appear to be running in WSL (Windows Subsystem for Linux)."
-        echo "If you previously installed Claude Code via Windows npm, you may need to:"
-        echo "  1. Open Windows Command Prompt or PowerShell"
-        echo "  2. Run: npm uninstall -g @anthropic-ai/claude-code"
-        echo "  3. Or manually delete: %APPDATA%\npm\claude"
         echo ""
-        echo "If you still see 'Permission denied' errors, check:"
-        echo "  - Windows PATH entries in WSL: echo \$PATH"
-        echo "  - Remove Windows npm from WSL PATH if needed"
+        echo "IF YOU STILL SEE 'Permission denied' ERRORS:"
+        echo ""
+        echo "1. Remove Windows npm from your WSL PATH:"
+        echo "   Add this line to your ~/.bashrc:"
+        echo ""
+        echo "   export PATH=\$(echo \$PATH | tr ':' '\\n' | grep -v '/mnt/c.*npm' | tr '\\n' ':')"
+        echo ""
+        echo "2. Or manually remove Windows npm files:"
+        echo "   rm -f /mnt/c/Users/\$USER/AppData/Roaming/npm/claude"
+        echo "   rm -f /mnt/c/Users/\$USER/AppData/Roaming/npm/claude.cmd"
+        echo ""
+        echo "3. Alternative - Open Windows PowerShell and run:"
+        echo "   npm uninstall -g @anthropic-ai/claude-code"
+        echo ""
+        echo "4. Then restart your terminal completely"
         echo "============================================================================="
     fi
     echo ""
