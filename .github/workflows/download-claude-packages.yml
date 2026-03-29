@@ -1,21 +1,66 @@
 name: Download Claude Code Offline Packages
 
 on:
-  # 手动触发
+  # Manual trigger
   workflow_dispatch:
-  # 每周一自动运行检查更新
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild even if version exists'
+        required: false
+        default: 'false'
+  # Daily check for new versions at 00:00 UTC
+  schedule:
+    - cron: '0 0 * * *'
+  # Weekly full rebuild every Monday at 00:00 UTC
   schedule:
     - cron: '0 0 * * 1'
-  # 发布时触发
-  release:
-    types: [created]
 
 env:
   NODE_VERSION: '20'
+  NPM_REGISTRY: 'https://registry.npmmirror.com'
 
 jobs:
-  build-offline-packages:
+  check-version:
     runs-on: ubuntu-latest
+    outputs:
+      latest_version: ${{ steps.check.outputs.latest_version }}
+      should_build: ${{ steps.check.outputs.should_build }}
+      release_exists: ${{ steps.check.outputs.release_exists }}
+    steps:
+      - name: Check latest version from npm
+        id: check
+        run: |
+          # Get latest version from npm
+          LATEST_VERSION=$(curl -s https://registry.npmjs.org/@anthropic-ai/claude-code | jq -r '.["dist-tags"].latest')
+          echo "Latest npm version: $LATEST_VERSION"
+          echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          
+          # Check if release already exists
+          RELEASE_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases/tags/v${LATEST_VERSION}")
+          
+          if [ "$RELEASE_EXISTS" = "200" ]; then
+            echo "Release v${LATEST_VERSION} already exists"
+            echo "release_exists=true" >> $GITHUB_OUTPUT
+            
+            # Check if force rebuild
+            if [ "${{ github.event.inputs.force_rebuild }}" = "true" ]; then
+              echo "Force rebuild requested"
+              echo "should_build=true" >> $GITHUB_OUTPUT
+            else
+              echo "Skipping build - version already exists"
+              echo "should_build=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "Release v${LATEST_VERSION} does not exist"
+            echo "release_exists=false" >> $GITHUB_OUTPUT
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          fi
+
+  build-offline-packages:
+    needs: check-version
+    runs-on: ubuntu-latest
+    if: needs.check-version.outputs.should_build == 'true'
     permissions:
       contents: write
     
@@ -27,52 +72,57 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          registry-url: 'https://registry.npmmirror.com'  # 使用国内镜像加速
+          registry-url: ${{ env.NPM_REGISTRY }}
 
       - name: Configure npm mirrors
         run: |
-          # 配置 npm 使用国内镜像
-          npm config set registry https://registry.npmmirror.com
+          # Configure npm to use domestic mirror
+          npm config set registry ${{ env.NPM_REGISTRY }}
           
-          # 配置其他常用镜像
+          # Configure other common mirrors
           npm config set disturl https://npmmirror.com/mirrors/node
           npm config set electron_mirror https://npmmirror.com/mirrors/electron/
           npm config set sass_binary_site https://npmmirror.com/mirrors/node-sass/
           npm config set phantomjs_cdnurl https://npmmirror.com/mirrors/phantomjs/
           
-          echo "npm registry configured"
+          echo "npm registry configured: $(npm config get registry)"
 
       - name: Install Claude Code globally
         run: |
           npm install -g @anthropic-ai/claude-code
+          
+          # Verify installation
+          CLAUDE_VERSION=$(claude --version 2>/dev/null || echo "${{ needs.check-version.outputs.latest_version }}")
+          echo "Installed Claude Code version: $CLAUDE_VERSION"
+          echo "CLAUDE_VERSION=$CLAUDE_VERSION" >> $GITHUB_ENV
 
       - name: Prepare offline packages
         run: |
-          # 创建输出目录
+          # Create output directory
           mkdir -p claude-offline-packages
           
-          # 获取 Claude Code 版本
-          CLAUDE_VERSION=$(claude --version 2>/dev/null || echo "latest")
+          # Get Claude Code version
+          CLAUDE_VERSION="${{ needs.check-version.outputs.latest_version }}"
           echo "CLAUDE_VERSION=$CLAUDE_VERSION" >> $GITHUB_ENV
-          echo "Claude Code version: $CLAUDE_VERSION"
+          echo "Building Claude Code version: $CLAUDE_VERSION"
           
-          # 找到全局安装路径
+          # Find global installation path
           GLOBAL_PREFIX=$(npm prefix -g)
           echo "NPM global prefix: $GLOBAL_PREFIX"
           
-          # 复制 node_modules 到离线包目录
+          # Copy node_modules to offline package directory
           if [ -d "$GLOBAL_PREFIX/lib/node_modules/@anthropic-ai" ]; then
             cp -r "$GLOBAL_PREFIX/lib/node_modules/@anthropic-ai/claude-code" claude-offline-packages/
-            # 安装其他依赖
+            # Install other dependencies
             cd claude-offline-packages
             npm install ./claude-code --production
           else
-            # 备用方案：直接 npm install
+            # Fallback: direct npm install
             cd claude-offline-packages
             npm install @anthropic-ai/claude-code --production
           fi
           
-          # 创建 .bin 目录和链接
+          # Create .bin directory and links
           mkdir -p node_modules/.bin
           if [ -f "claude-code/cli.js" ]; then
             ln -sf ../claude-code/cli.js node_modules/.bin/claude
@@ -80,14 +130,14 @@ jobs:
             ln -sf ../@anthropic-ai/claude-code/cli.js node_modules/.bin/claude
           fi
           
-          # 添加执行权限
+          # Add execute permissions
           chmod +x node_modules/.bin/claude 2>/dev/null || true
           chmod +x claude-code/cli.js 2>/dev/null || true
           chmod +x node_modules/@anthropic-ai/claude-code/cli.js 2>/dev/null || true
 
       - name: Download VSCode extension
         run: |
-          # 尝试下载最新版本的 VSCode 扩展
+          # Try to download latest VSCode extension
           EXTENSION_URL=$(curl -s https://api.github.com/repos/anthropics/claude-code/releases/latest | \
             grep "browser_download_url.*vsix" | head -1 | cut -d '"' -f 4)
           
@@ -101,7 +151,7 @@ jobs:
 
       - name: Copy setup script
         run: |
-          # 复制 setup-claude-code.sh 到离线包目录
+          # Copy setup-claude-code.sh to offline package directory
           cp setup-claude-code.sh claude-offline-packages/
           chmod +x claude-offline-packages/setup-claude-code.sh
           echo "Setup script copied to offline packages"
@@ -111,10 +161,11 @@ jobs:
           cat > claude-offline-packages/package-info.json << EOF
           {
             "name": "claude-offline-packages",
-            "version": "${{ env.CLAUDE_VERSION }}",
+            "version": "${{ needs.check-version.outputs.latest_version }}",
             "created_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
             "node_version": "${{ env.NODE_VERSION }}",
-            "source": "https://www.npmjs.com/package/@anthropic-ai/claude-code"
+            "source": "https://www.npmjs.com/package/@anthropic-ai/claude-code",
+            "github_repo": "${{ github.repository }}"
           }
           EOF
 
@@ -122,47 +173,80 @@ jobs:
         run: |
           tar -czf claude-offline-packages.tar.gz claude-offline-packages/
           
-          # 计算校验和
+          # Calculate checksum
           sha256sum claude-offline-packages.tar.gz > claude-offline-packages.tar.gz.sha256
           
-          # 显示包大小
+          # Show package size
+          echo "Package size:"
           ls -lh claude-offline-packages.tar.gz
 
-      - name: Upload to GitHub Release
+      - name: Create GitHub Release
+        id: create_release
         uses: softprops/action-gh-release@v1
-        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
         with:
-          tag_name: ${{ github.event.release.tag_name || format('v{0}', env.CLAUDE_VERSION) }}
-          files: |
-            claude-offline-packages.tar.gz
-            claude-offline-packages.tar.gz.sha256
+          tag_name: v${{ needs.check-version.outputs.latest_version }}
+          name: Claude Code v${{ needs.check-version.outputs.latest_version }}
           body: |
-            Claude Code 离线安装包
+            ## Claude Code Offline Package v${{ needs.check-version.outputs.latest_version }}
             
-            - 版本: ${{ env.CLAUDE_VERSION }}
-            - Node.js 版本: ${{ env.NODE_VERSION }}
-            - 创建时间: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+            **Version:** ${{ needs.check-version.outputs.latest_version }}  
+            **Node.js:** ${{ env.NODE_VERSION }}  
+            **Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
             
-            ## 使用方法
+            ### Downloads
             
-            1. 下载 `claude-offline-packages.tar.gz`
-            2. 解压到任意目录：`tar -xzf claude-offline-packages.tar.gz`
-            3. 进入目录：`cd claude-offline-packages`
-            4. 运行脚本：`bash setup-claude-code.sh`
+            | File | Description |
+            |------|-------------|
+            | `claude-offline-packages.tar.gz` | Offline installation package |
+            | `claude-offline-packages.tar.gz.sha256` | SHA256 checksum |
             
-            ## 校验
+            ### Quick Start
+            
+            ```bash
+            # 1. Download and extract
+            tar -xzf claude-offline-packages.tar.gz
+            
+            # 2. Run installer
+            cd claude-offline-packages
+            bash setup-claude-code.sh
+            ```
+            
+            ### Verification
             
             ```bash
             sha256sum -c claude-offline-packages.tar.gz.sha256
             ```
+            
+            ### Features
+            
+            - ✅ Automatic mirror source detection
+            - ✅ Region restriction bypass
+            - ✅ Multi-language support (EN/ZH)
+            - ✅ Universal Node.js installation
+            - ✅ Uninstall support
+          draft: false
+          prerelease: false
+          files: |
+            claude-offline-packages.tar.gz
+            claude-offline-packages.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: claude-offline-packages
+          name: claude-offline-packages-v${{ needs.check-version.outputs.latest_version }}
           path: |
             claude-offline-packages.tar.gz
             claude-offline-packages.tar.gz.sha256
           retention-days: 30
+
+  notify-no-build:
+    needs: check-version
+    runs-on: ubuntu-latest
+    if: needs.check-version.outputs.should_build == 'false'
+    steps:
+      - name: Skip notification
+        run: |
+          echo "Skipping build - version ${{ needs.check-version.outputs.latest_version }} already exists"
+          echo "To force rebuild, trigger workflow with 'force_rebuild' set to 'true'"
