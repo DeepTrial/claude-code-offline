@@ -679,9 +679,16 @@ install_nodejs() {
         npm_mirror=$(select_fastest_npm_mirror)
         export NVM_NODEJS_ORG_MIRROR="${npm_mirror/registry.npmmirror.com\/mirrors\/node}"
         
-        nvm install 20
-        nvm use 20
-        nvm alias default 20
+        # Try to install Node.js 20, fallback to lts if not available
+        if ! nvm install 20 2>/dev/null; then
+            log_warn "Node.js 20 not available, trying LTS version..."
+            nvm install --lts || {
+                log_error "Failed to install Node.js via nvm"
+                return 1
+            }
+        fi
+        nvm use 20 2>/dev/null || nvm use --lts
+        nvm alias default 20 2>/dev/null || nvm alias default --lts
         log_ok "Node.js installed via nvm"
         return 0
     fi
@@ -692,7 +699,8 @@ install_nodejs() {
     
     if download_with_mirrors "$nvm_install_script" "${NVM_INSTALL_MIRRORS[@]}"; then
         chmod +x "$nvm_install_script"
-        bash "$nvm_install_script"
+        # Install nvm without modifying shell config (we'll do it manually)
+        PROFILE=/dev/null bash "$nvm_install_script" 2>/dev/null || bash "$nvm_install_script"
         rm -f "$nvm_install_script"
         
         export NVM_DIR="$HOME/.nvm"
@@ -715,9 +723,16 @@ NVMBLOCK
         npm_mirror=$(select_fastest_npm_mirror)
         export NVM_NODEJS_ORG_MIRROR="${npm_mirror/https:\/\/registry.npmmirror.com\/}/mirrors/node/"
         
-        nvm install 20
-        nvm use 20
-        nvm alias default 20
+        # Try to install Node.js 20, fallback to lts if not available
+        if ! nvm install 20 2>/dev/null; then
+            log_warn "Node.js 20 not available, trying LTS version..."
+            nvm install --lts || {
+                log_error "Failed to install Node.js via nvm"
+                return 1
+            }
+        fi
+        nvm use 20 2>/dev/null || nvm use --lts
+        nvm alias default 20 2>/dev/null || nvm alias default --lts
         
         log_ok "Node.js installed via nvm"
         return 0
