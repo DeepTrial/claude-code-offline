@@ -1,6 +1,6 @@
 # Claude Code 离线部署方案
 
-> 简体中文 | [English](README.en.md)
+> **简体中文** | [English](docs/i18n/README.en.md) | [繁體中文](docs/i18n/README.zh-TW.md) | [Русский](docs/i18n/README.ru.md) | [日本語](docs/i18n/README.ja.md) | [한국어](docs/i18n/README.ko.md)
 
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Enabled-blue)](.github/workflows/download-claude-packages.yml)
 [![Version](https://img.shields.io/badge/version-2.1-green)](setup-claude-code.sh)

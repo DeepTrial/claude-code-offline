@@ -1,10 +1,10 @@
 # Claude Code Offline Deployment
 
-> [简体中文](README.md) | English
+> [简体中文](../../README.md) | **English** | [繁體中文](README.zh-TW.md) | [Русский](README.ru.md) | [日本語](README.ja.md) | [한국어](README.ko.md)
 
-[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Enabled-blue)](.github/workflows/download-claude-packages.yml)
-[![Version](https://img.shields.io/badge/version-2.1-green)](setup-claude-code.sh)
-[![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+[![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Enabled-blue)](../../.github/workflows/download-claude-packages.yml)
+[![Version](https://img.shields.io/badge/version-2.1-green)](../../setup-claude-code.sh)
+[![License](https://img.shields.io/badge/license-MIT-yellow)](../../LICENSE)
 
 An intelligent offline deployment solution for Claude Code with automatic mirror detection, region restriction bypass, and multi-language support.
 
