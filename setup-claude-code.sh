@@ -16,7 +16,10 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Configuration & Constants
 # ---------------------------------------------------------------------------
+# Get absolute path of script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Convert to absolute path in case it's relative
+SCRIPT_DIR="$(cd "$SCRIPT_DIR" && pwd)"
 USER_CLAUDE_DIR="$HOME/.claude"
 USER_TMPDIR="$HOME/.claude/tmp"
 BASHRC="$HOME/.bashrc"
@@ -1118,6 +1121,18 @@ else
     else
         log_ok "Found offline packages at: $OFFLINE_PACKAGES"
     fi
+fi
+
+# Convert OFFLINE_PACKAGES to absolute path
+OFFLINE_PACKAGES="$(cd "$OFFLINE_PACKAGES" && pwd)"
+log_info "Using absolute path: $OFFLINE_PACKAGES"
+
+# Fix permissions for the package files
+log_info "Fixing permissions..."
+chmod -R +x "$OFFLINE_PACKAGES/node_modules/.bin/" 2>/dev/null || true
+chmod -R +x "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/" 2>/dev/null || true
+if [ -f "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+    chmod +x "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli.js"
 fi
 
 # Set binary path
