@@ -24,6 +24,7 @@ An intelligent offline deployment solution for Claude Code with automatic mirror
 
 - [Quick Start](#quick-start)
 - [Features](#features)
+- [Automatic Version Updates](#automatic-version-updates)
 - [Mirror Source Detection](#mirror-source-detection)
 - [Region Restriction Bypass](#region-restriction-bypass)
 - [Usage](#usage)
@@ -33,6 +34,53 @@ An intelligent offline deployment solution for Claude Code with automatic mirror
 - [GitHub Actions Workflow](#github-actions-workflow)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
+
+## Automatic Version Updates
+
+The repository includes automatic version checking and update mechanisms:
+
+### GitHub Actions Auto-Build
+
+The workflow automatically:
+1. **Daily Check**: Checks npm registry daily for new versions at 00:00 UTC
+2. **Version Comparison**: Compares npm version with existing GitHub Releases
+3. **Smart Build**: Only builds when a new version is detected
+4. **Auto-Release**: Creates a new GitHub Release with the new version
+
+### Schedule
+
+| Trigger | Schedule | Action |
+|---------|----------|--------|
+| Daily Check | `0 0 * * *` | Check npm for new versions, build if newer |
+| Weekly Rebuild | `0 0 * * 1` | Full rebuild every Monday |
+| Manual | `workflow_dispatch` | Manual trigger with force rebuild option |
+
+### Local Version Checker
+
+Use the included `check-update.sh` script to check and download updates:
+
+```bash
+# Check for updates interactively
+bash check-update.sh
+
+# Only check versions
+bash check-update.sh --check-only
+
+# Download if update available
+bash check-update.sh --download
+
+# Download and install if update available
+bash check-update.sh --install
+```
+
+### Force Rebuild
+
+If you need to rebuild an existing version:
+
+1. Go to GitHub Actions → "Download Claude Code Offline Packages"
+2. Click "Run workflow"
+3. Check "Force rebuild even if version exists"
+4. Click "Run workflow"
 
 ## Quick Start
 

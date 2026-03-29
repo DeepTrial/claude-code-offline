@@ -34,6 +34,53 @@
 - [配置说明](#配置说明)
 - [故障排除](#故障排除)
 
+## 自动版本更新
+
+本仓库包含自动版本检查和更新机制：
+
+### GitHub Actions 自动构建
+
+工作流自动执行：
+1. **每日检查**：每天 UTC 00:00 检查 npm registry 新版本
+2. **版本对比**：对比 npm 版本与现有 GitHub Release
+3. **智能构建**：仅检测到新版本时才构建
+4. **自动发布**：自动创建 GitHub Release
+
+### 定时任务
+
+| 触发器 | 定时 | 动作 |
+|--------|------|------|
+| 每日检查 | `0 0 * * *` | 检查 npm 新版本，有新版本则构建 |
+| 每周重建 | `0 0 * * 1` | 每周一完整重建 |
+| 手动触发 | `workflow_dispatch` | 手动触发，支持强制重建 |
+
+### 本地版本检查器
+
+使用 `check-update.sh` 脚本检查和下载更新：
+
+```bash
+# 交互式检查更新
+bash check-update.sh
+
+# 仅检查版本
+bash check-update.sh --check-only
+
+# 有更新则下载
+bash check-update.sh --download
+
+# 有更新则下载并安装
+bash check-update.sh --install
+```
+
+### 强制重建
+
+如需重建已有版本：
+
+1. 进入 GitHub Actions → "Download Claude Code Offline Packages"
+2. 点击 "Run workflow"
+3. 勾选 "Force rebuild even if version exists"
+4. 点击 "Run workflow"
+
 ## 快速开始
 
 ```bash
