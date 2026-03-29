@@ -108,12 +108,7 @@ jobs:
           # Configure npm to use domestic mirror
           npm config set registry ${{ env.NPM_REGISTRY }}
           
-          # Configure other common mirrors
-          npm config set disturl https://npmmirror.com/mirrors/node
-          npm config set electron_mirror https://npmmirror.com/mirrors/electron/
-          npm config set sass_binary_site https://npmmirror.com/mirrors/node-sass/
-          npm config set phantomjs_cdnurl https://npmmirror.com/mirrors/phantomjs/
-          
+          # Verify configuration
           echo "npm registry configured: $(npm config get registry)"
 
       - name: Install Claude Code globally
