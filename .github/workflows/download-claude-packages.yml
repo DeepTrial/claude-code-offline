@@ -189,8 +189,32 @@ jobs:
           # Go back to root directory (Prepare step changed to claude-offline-packages)
           cd "$GITHUB_WORKSPACE"
           
+          # Try GitHub releases first
+          echo "Checking GitHub releases..."
           RELEASE_INFO=$(curl -s https://api.github.com/repos/anthropics/claude-code/releases/latest)
-          EXTENSION_URL=$(echo "$RELEASE_INFO" | jq -r '.assets[] | select(.name | contains(".vsix")) | .browser_download_url' | head -1)
+          EXTENSION_URL=$(echo "$RELEASE_INFO" | jq -r '.assets[]? | select(.name | contains(".vsix")) | .browser_download_url' | head -1)
+          
+          # If not found in releases, try VSCode Marketplace API
+          if [ -z "$EXTENSION_URL" ] || [ "$EXTENSION_URL" = "null" ]; then
+            echo "Not found in GitHub releases, trying VSCode Marketplace..."
+            
+            # Get extension info from VSCode Marketplace
+            MARKETPLACE_RESPONSE=$(curl -s -X POST "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json;api-version=7.1-preview.1" \
+              -d '{"filters":[{"criteria":[{"filterType":7,"value":"anthropic.claude-code"}]}],"flags":1}' 2>/dev/null)
+            
+            # Try to extract download URL
+            if [ -n "$MARKETPLACE_RESPONSE" ]; then
+              # Extract version and construct download URL
+              EXT_VERSION=$(echo "$MARKETPLACE_RESPONSE" | jq -r '.results[0].extensions[0].versions[0].version' 2>/dev/null)
+              if [ -n "$EXT_VERSION" ] && [ "$EXT_VERSION" != "null" ]; then
+                echo "Found VSCode extension version: $EXT_VERSION"
+                # VSCode marketplace direct download URL format
+                EXTENSION_URL="https://marketplace.visualstudio.com/_apis/public/gallery/publishers/anthropic/vsextensions/claude-code/${EXT_VERSION}/vspackage"
+              fi
+            fi
+          fi
           
           if [ -n "$EXTENSION_URL" ] && [ "$EXTENSION_URL" != "null" ]; then
             echo "Downloading VSCode extension from: $EXTENSION_URL"
@@ -198,13 +222,20 @@ jobs:
               echo "WARNING: Failed to download VSCode extension"
             }
             
-            # Verify download
+            # Verify download (check if file is valid, not HTML error page)
             if [ -f "claude-offline-packages/anthropic.claude-code.vsix" ]; then
-              echo "✓ VSCode extension downloaded successfully"
-              ls -lh claude-offline-packages/anthropic.claude-code.vsix
+              FILE_SIZE=$(stat -f%z "claude-offline-packages/anthropic.claude-code.vsix" 2>/dev/null || stat -c%s "claude-offline-packages/anthropic.claude-code.vsix" 2>/dev/null || echo "0")
+              if [ "$FILE_SIZE" -gt 1000 ]; then
+                echo "✓ VSCode extension downloaded successfully ($(numfmt --to=iec $FILE_SIZE 2>/dev/null || echo ${FILE_SIZE}b))"
+                ls -lh claude-offline-packages/anthropic.claude-code.vsix
+              else
+                echo "! Downloaded file too small, likely an error page. Removing..."
+                rm -f claude-offline-packages/anthropic.claude-code.vsix
+              fi
             fi
           else
-            echo "No VSCode extension found in releases, skipping..."
+            echo "No VSCode extension found in releases or marketplace, skipping..."
+            echo "You can manually install the extension from VSCode Marketplace: anthropic.claude-code"
           fi
         continue-on-error: true
 
