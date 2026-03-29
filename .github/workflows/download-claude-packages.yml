@@ -9,11 +9,10 @@ on:
         required: false
         default: 'false'
   # Daily check for new versions at 00:00 UTC
-  schedule:
-    - cron: '0 0 * * *'
   # Weekly full rebuild every Monday at 00:00 UTC
   schedule:
-    - cron: '0 0 * * 1'
+    - cron: '0 0 * * *'   # Daily
+    - cron: '0 0 * * 1'   # Weekly (Monday)
 
 env:
   NODE_VERSION: '20'
@@ -27,32 +26,57 @@ jobs:
       should_build: ${{ steps.check.outputs.should_build }}
       release_exists: ${{ steps.check.outputs.release_exists }}
     steps:
+      - name: Install jq
+        run: |
+          sudo apt-get update && sudo apt-get install -y jq
+
       - name: Check latest version from npm
         id: check
         run: |
+          set -e
+          
+          echo "=== Checking latest version from npm ==="
+          
           # Get latest version from npm
-          LATEST_VERSION=$(curl -s https://registry.npmjs.org/@anthropic-ai/claude-code | jq -r '.["dist-tags"].latest')
+          NPM_RESPONSE=$(curl -s https://registry.npmjs.org/@anthropic-ai/claude-code)
+          LATEST_VERSION=$(echo "$NPM_RESPONSE" | jq -r '.["dist-tags"].latest // empty')
+          
+          if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" = "null" ]; then
+            echo "ERROR: Failed to get version from npm"
+            echo "Response: $NPM_RESPONSE"
+            exit 1
+          fi
+          
           echo "Latest npm version: $LATEST_VERSION"
           echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
           
           # Check if release already exists
-          RELEASE_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" \
+          echo "=== Checking if release exists ==="
+          RELEASE_RESPONSE=$(curl -s -w "\n%{http_code}" \
             "https://api.github.com/repos/${{ github.repository }}/releases/tags/v${LATEST_VERSION}")
           
-          if [ "$RELEASE_EXISTS" = "200" ]; then
+          HTTP_CODE=$(echo "$RELEASE_RESPONSE" | tail -1)
+          
+          if [ "$HTTP_CODE" = "200" ]; then
             echo "Release v${LATEST_VERSION} already exists"
             echo "release_exists=true" >> $GITHUB_OUTPUT
             
             # Check if force rebuild
-            if [ "${{ github.event.inputs.force_rebuild }}" = "true" ]; then
+            FORCE_REBUILD="${{ github.event.inputs.force_rebuild }}"
+            if [ "$FORCE_REBUILD" = "true" ]; then
               echo "Force rebuild requested"
               echo "should_build=true" >> $GITHUB_OUTPUT
             else
               echo "Skipping build - version already exists"
               echo "should_build=false" >> $GITHUB_OUTPUT
             fi
-          else
+          elif [ "$HTTP_CODE" = "404" ]; then
             echo "Release v${LATEST_VERSION} does not exist"
+            echo "release_exists=false" >> $GITHUB_OUTPUT
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "WARNING: Unexpected HTTP code $HTTP_CODE"
+            echo "Assuming release does not exist, proceeding with build"
             echo "release_exists=false" >> $GITHUB_OUTPUT
             echo "should_build=true" >> $GITHUB_OUTPUT
           fi
@@ -65,6 +89,12 @@ jobs:
       contents: write
     
     steps:
+      - name: Debug outputs
+        run: |
+          echo "Latest version: ${{ needs.check-version.outputs.latest_version }}"
+          echo "Should build: ${{ needs.check-version.outputs.should_build }}"
+          echo "Release exists: ${{ needs.check-version.outputs.release_exists }}"
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -72,7 +102,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          registry-url: ${{ env.NPM_REGISTRY }}
 
       - name: Configure npm mirrors
         run: |
@@ -92,12 +121,20 @@ jobs:
           npm install -g @anthropic-ai/claude-code
           
           # Verify installation
-          CLAUDE_VERSION=$(claude --version 2>/dev/null || echo "${{ needs.check-version.outputs.latest_version }}")
-          echo "Installed Claude Code version: $CLAUDE_VERSION"
+          echo "=== Verifying installation ==="
+          which claude || echo "claude not in PATH"
+          ls -la $(npm prefix -g)/lib/node_modules/@anthropic-ai/claude-code/ || true
+          
+          CLAUDE_VERSION="${{ needs.check-version.outputs.latest_version }}"
           echo "CLAUDE_VERSION=$CLAUDE_VERSION" >> $GITHUB_ENV
+          echo "Building Claude Code version: $CLAUDE_VERSION"
 
       - name: Prepare offline packages
         run: |
+          set -e
+          
+          echo "=== Preparing offline packages ==="
+          
           # Create output directory
           mkdir -p claude-offline-packages
           
@@ -110,40 +147,55 @@ jobs:
           GLOBAL_PREFIX=$(npm prefix -g)
           echo "NPM global prefix: $GLOBAL_PREFIX"
           
-          # Copy node_modules to offline package directory
-          if [ -d "$GLOBAL_PREFIX/lib/node_modules/@anthropic-ai" ]; then
+          # Check if global installation exists
+          if [ -d "$GLOBAL_PREFIX/lib/node_modules/@anthropic-ai/claude-code" ]; then
+            echo "Found global installation, copying..."
             cp -r "$GLOBAL_PREFIX/lib/node_modules/@anthropic-ai/claude-code" claude-offline-packages/
-            # Install other dependencies
             cd claude-offline-packages
             npm install ./claude-code --production
           else
-            # Fallback: direct npm install
+            echo "No global installation found, installing directly..."
             cd claude-offline-packages
             npm install @anthropic-ai/claude-code --production
           fi
           
           # Create .bin directory and links
           mkdir -p node_modules/.bin
+          
           if [ -f "claude-code/cli.js" ]; then
+            echo "Creating symlink for claude-code/cli.js"
             ln -sf ../claude-code/cli.js node_modules/.bin/claude
           elif [ -f "node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+            echo "Creating symlink for node_modules version"
             ln -sf ../@anthropic-ai/claude-code/cli.js node_modules/.bin/claude
+          else
+            echo "ERROR: cli.js not found"
+            find . -name "cli.js" 2>/dev/null || true
+            exit 1
           fi
           
           # Add execute permissions
           chmod +x node_modules/.bin/claude 2>/dev/null || true
-          chmod +x claude-code/cli.js 2>/dev/null || true
-          chmod +x node_modules/@anthropic-ai/claude-code/cli.js 2>/dev/null || true
+          chmod -R +x claude-code/ 2>/dev/null || true
+          chmod -R +x node_modules/@anthropic-ai/ 2>/dev/null || true
+          
+          echo "=== Package structure ==="
+          ls -la
+          ls -la node_modules/.bin/ || true
 
       - name: Download VSCode extension
         run: |
           # Try to download latest VSCode extension
-          EXTENSION_URL=$(curl -s https://api.github.com/repos/anthropics/claude-code/releases/latest | \
-            grep "browser_download_url.*vsix" | head -1 | cut -d '"' -f 4)
+          echo "=== Checking for VSCode extension ==="
           
-          if [ -n "$EXTENSION_URL" ]; then
+          RELEASE_INFO=$(curl -s https://api.github.com/repos/anthropics/claude-code/releases/latest)
+          EXTENSION_URL=$(echo "$RELEASE_INFO" | jq -r '.assets[] | select(.name | contains(".vsix")) | .browser_download_url' | head -1)
+          
+          if [ -n "$EXTENSION_URL" ] && [ "$EXTENSION_URL" != "null" ]; then
             echo "Downloading VSCode extension from: $EXTENSION_URL"
-            curl -L -o claude-offline-packages/anthropic.claude-code.vsix "$EXTENSION_URL"
+            curl -L -o claude-offline-packages/anthropic.claude-code.vsix "$EXTENSION_URL" || {
+              echo "WARNING: Failed to download VSCode extension"
+            }
           else
             echo "No VSCode extension found in releases, skipping..."
           fi
@@ -151,26 +203,41 @@ jobs:
 
       - name: Copy setup script
         run: |
-          # Copy setup-claude-code.sh to offline package directory
+          echo "=== Copying setup script ==="
           cp setup-claude-code.sh claude-offline-packages/
           chmod +x claude-offline-packages/setup-claude-code.sh
-          echo "Setup script copied to offline packages"
+          
+          if [ -f "check-update.sh" ]; then
+            cp check-update.sh claude-offline-packages/
+            chmod +x claude-offline-packages/check-update.sh
+          fi
+          
+          echo "Files in package:"
+          ls -la claude-offline-packages/
 
       - name: Create package info
         run: |
+          BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          CLAUDE_VERSION="${{ needs.check-version.outputs.latest_version }}"
+          
           cat > claude-offline-packages/package-info.json << EOF
           {
             "name": "claude-offline-packages",
-            "version": "${{ needs.check-version.outputs.latest_version }}",
-            "created_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "version": "${CLAUDE_VERSION}",
+            "created_at": "${BUILD_DATE}",
             "node_version": "${{ env.NODE_VERSION }}",
             "source": "https://www.npmjs.com/package/@anthropic-ai/claude-code",
             "github_repo": "${{ github.repository }}"
           }
           EOF
+          
+          echo "=== Package info ==="
+          cat claude-offline-packages/package-info.json
 
       - name: Pack offline packages
         run: |
+          echo "=== Packing offline packages ==="
+          
           tar -czf claude-offline-packages.tar.gz claude-offline-packages/
           
           # Calculate checksum
@@ -179,6 +246,11 @@ jobs:
           # Show package size
           echo "Package size:"
           ls -lh claude-offline-packages.tar.gz
+          ls -lh claude-offline-packages.tar.gz.sha256
+          
+          # Verify archive
+          echo "=== Verifying archive ==="
+          tar -tzf claude-offline-packages.tar.gz | head -20
 
       - name: Create GitHub Release
         id: create_release
