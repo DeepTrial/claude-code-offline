@@ -186,6 +186,9 @@ jobs:
           # Try to download latest VSCode extension
           echo "=== Checking for VSCode extension ==="
           
+          # Go back to root directory (Prepare step changed to claude-offline-packages)
+          cd "$GITHUB_WORKSPACE"
+          
           RELEASE_INFO=$(curl -s https://api.github.com/repos/anthropics/claude-code/releases/latest)
           EXTENSION_URL=$(echo "$RELEASE_INFO" | jq -r '.assets[] | select(.name | contains(".vsix")) | .browser_download_url' | head -1)
           
@@ -194,6 +197,12 @@ jobs:
             curl -L -o claude-offline-packages/anthropic.claude-code.vsix "$EXTENSION_URL" || {
               echo "WARNING: Failed to download VSCode extension"
             }
+            
+            # Verify download
+            if [ -f "claude-offline-packages/anthropic.claude-code.vsix" ]; then
+              echo "✓ VSCode extension downloaded successfully"
+              ls -lh claude-offline-packages/anthropic.claude-code.vsix
+            fi
           else
             echo "No VSCode extension found in releases, skipping..."
           fi
@@ -202,6 +211,10 @@ jobs:
       - name: Copy setup script
         run: |
           echo "=== Copying setup script ==="
+          
+          # Ensure we're in the correct directory
+          cd "$GITHUB_WORKSPACE"
+          
           cp setup-claude-code.sh claude-offline-packages/
           chmod +x claude-offline-packages/setup-claude-code.sh
           
@@ -212,6 +225,13 @@ jobs:
           
           echo "Files in package:"
           ls -la claude-offline-packages/
+          
+          # Verify VSCode extension is included
+          if [ -f "claude-offline-packages/anthropic.claude-code.vsix" ]; then
+            echo "✓ VSCode extension included in package"
+          else
+            echo "! VSCode extension not found in package"
+          fi
 
       - name: Create package info
         run: |
@@ -236,6 +256,17 @@ jobs:
         run: |
           echo "=== Packing offline packages ==="
           
+          # List all files before packing
+          echo "Files to be packed:"
+          ls -la claude-offline-packages/
+          
+          # Check if VSCode extension exists
+          if [ -f "claude-offline-packages/anthropic.claude-code.vsix" ]; then
+            echo "✓ VSCode extension will be included in the package"
+          else
+            echo "! Warning: VSCode extension not found"
+          fi
+          
           tar -czf claude-offline-packages.tar.gz claude-offline-packages/
           
           # Calculate checksum
@@ -246,9 +277,10 @@ jobs:
           ls -lh claude-offline-packages.tar.gz
           ls -lh claude-offline-packages.tar.gz.sha256
           
-          # Verify archive
-          echo "=== Verifying archive ==="
-          tar -tzf claude-offline-packages.tar.gz | head -20
+          # Verify archive contents
+          echo "=== Verifying archive contents ==="
+          echo "Looking for VSCode extension in archive:"
+          tar -tzf claude-offline-packages.tar.gz | grep -i "vsix" || echo "! VSCode extension not found in archive"
 
       - name: Create GitHub Release
         id: create_release
