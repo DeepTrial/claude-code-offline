@@ -87,6 +87,17 @@ detect_existing_installation() {
         install_paths="  - Claude binary: $claude_path"
     fi
     
+    # Check for npm global installation
+    if command -v npm >/dev/null 2>&1; then
+        local npm_global_path
+        npm_global_path=$(npm list -g @anthropic-ai/claude-code 2>/dev/null | grep -o "/.*claude-code" | head -1)
+        if [ -n "$npm_global_path" ] && [ -d "$npm_global_path" ]; then
+            found=true
+            install_paths="$install_paths
+  - npm global: $npm_global_path"
+        fi
+    fi
+    
     # Check ~/.claude directory
     if [ -d "$HOME/.claude" ]; then
         found=true
@@ -101,7 +112,7 @@ detect_existing_installation() {
   - Config file: $HOME/.claude.json"
     fi
     
-    # 检查 .bashrc 中的配置
+    # Check .bashrc for configuration
     if [ -f "$BASHRC" ] && grep -q "$SETUP_START" "$BASHRC" 2>/dev/null; then
         found=true
         install_paths="$install_paths
@@ -123,18 +134,32 @@ uninstall_claude_code() {
     echo "============================================================================="
     echo ""
     
-    # 检测现有安装
+    # Detect existing installation
     local existing
     existing=$(detect_existing_installation)
     
-    if [ -z "$existing" ]; then
+    # Also check for npm global installation
+    local npm_global_claude=""
+    if command -v npm >/dev/null 2>&1; then
+        npm_global_claude=$(npm list -g @anthropic-ai/claude-code 2>/dev/null | grep "claude-code" || true)
+    fi
+    
+    if [ -z "$existing" ] && [ -z "$npm_global_claude" ]; then
         log_warn "No existing Claude Code installation detected."
         return 0
     fi
     
-    echo "Detected existing installation at:"
-    echo "$existing"
-    echo ""
+    if [ -n "$existing" ]; then
+        echo "Detected existing installation at:"
+        echo "$existing"
+        echo ""
+    fi
+    
+    if [ -n "$npm_global_claude" ]; then
+        echo "Detected npm global installation:"
+        echo "  $npm_global_claude"
+        echo ""
+    fi
     
     read -p "Are you sure you want to uninstall Claude Code? [y/N]: " -n 1 -r
     echo
@@ -167,8 +192,25 @@ uninstall_claude_code() {
         fi
     fi
     
-    # 2. Remove configuration from .bashrc
+    # 2. Remove npm global installation if exists
+    if [ -n "$npm_global_claude" ]; then
+        log_info "Removing npm global installation of Claude Code..."
+        npm uninstall -g @anthropic-ai/claude-code 2>/dev/null || {
+            log_warn "Failed to remove npm global installation automatically"
+            log_info "You may need to run manually: npm uninstall -g @anthropic-ai/claude-code"
+        }
+    fi
+    
+    # 3. Remove wrapper alias from .bashrc
     if [ -f "$BASHRC" ]; then
+        # Remove claude wrapper alias
+        if grep -q "claude-wrapper" "$BASHRC" 2>/dev/null; then
+            log_info "Removing claude wrapper alias from .bashrc..."
+            sed -i '/# Claude Code wrapper/d' "$BASHRC"
+            sed -i "/alias claude='bash/d" "$BASHRC" 2>/dev/null || true
+            log_ok "Removed wrapper alias"
+        fi
+        
         if grep -q "$SETUP_START" "$BASHRC" 2>/dev/null; then
             log_info "Removing PATH/TMPDIR configuration from .bashrc..."
             sed -i "/$SETUP_START/,/$SETUP_END/d" "$BASHRC"
@@ -202,21 +244,21 @@ uninstall_claude_code() {
         fi
     fi
     
-    # 3. Delete configuration files
+    # 4. Delete configuration files
     if [ -f "$HOME/.claude.json" ]; then
         log_info "Removing ~/.claude.json..."
         rm -f "$HOME/.claude.json"
         log_ok "Removed ~/.claude.json"
     fi
     
-    # 4. Delete ~/.claude directory
+    # 5. Delete ~/.claude directory
     if [ -d "$HOME/.claude" ]; then
         log_info "Removing ~/.claude directory..."
         rm -rf "$HOME/.claude"
         log_ok "Removed ~/.claude directory"
     fi
     
-    # 5. Ask if user wants to remove offline packages
+    # 6. Ask if user wants to remove offline packages
     if [ -d "$USER_CLAUDE_DIR/offline-packages" ]; then
         read -p "Remove downloaded offline packages? [y/N]: " -n 1 -r
         echo
@@ -226,7 +268,7 @@ uninstall_claude_code() {
         fi
     fi
     
-    # 6. Ask if user wants to remove Node.js
+    # 7. Ask if user wants to remove Node.js
     if [ -d "$HOME/.local/node" ]; then
         echo ""
         log_warn "Detected Node.js installation at: $HOME/.local/node"
@@ -238,7 +280,7 @@ uninstall_claude_code() {
         fi
     fi
     
-    # 7. Ask if user wants to remove nvm
+    # 8. Ask if user wants to remove nvm
     if [ -d "$HOME/.nvm" ]; then
         echo ""
         log_warn "Detected nvm installation at: $HOME/.nvm"
@@ -257,11 +299,31 @@ uninstall_claude_code() {
     echo ""
     echo "Claude Code has been uninstalled."
     echo ""
-    echo "To complete the uninstallation, please:"
-    echo "  1. Close and reopen your terminal, or run: source ~/.bashrc"
-    echo "  2. Verify: which claude (should return nothing)"
+    echo "IMPORTANT: To complete the uninstallation, please:"
+    echo "  1. Close and reopen your terminal (NOT just source ~/.bashrc)"
+    echo "     This ensures all environment variables are cleared"
+    echo "  2. Or run: exec bash -l"
+    echo "  3. Verify: which claude (should return nothing)"
     echo ""
+    
+    # WSL specific warning
+    if [ -f /proc/version ] && grep -q "Microsoft" /proc/version 2>/dev/null; then
+        echo "============================================================================="
+        echo "  WSL Environment Detected"
     echo "============================================================================="
+        echo ""
+        echo "You appear to be running in WSL (Windows Subsystem for Linux)."
+        echo "If you previously installed Claude Code via Windows npm, you may need to:"
+        echo "  1. Open Windows Command Prompt or PowerShell"
+        echo "  2. Run: npm uninstall -g @anthropic-ai/claude-code"
+        echo "  3. Or manually delete: %APPDATA%\npm\claude"
+        echo ""
+        echo "If you still see 'Permission denied' errors, check:"
+        echo "  - Windows PATH entries in WSL: echo \$PATH"
+        echo "  - Remove Windows npm from WSL PATH if needed"
+        echo "============================================================================="
+    fi
+    echo ""
     
     return 0
 }
