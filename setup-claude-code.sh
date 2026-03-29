@@ -83,18 +83,35 @@ detect_existing_installation() {
     if command -v claude >/dev/null 2>&1; then
         found=true
         local claude_path
-        claude_path=$(command -v claude)
+        claude_path=$(command -v claude 2>/dev/null)
         install_paths="  - Claude binary: $claude_path"
     fi
     
-    # Check for npm global installation
-    if command -v npm >/dev/null 2>&1; then
-        local npm_global_path
-        npm_global_path=$(npm list -g @anthropic-ai/claude-code 2>/dev/null | grep -o "/.*claude-code" | head -1)
-        if [ -n "$npm_global_path" ] && [ -d "$npm_global_path" ]; then
+    # Check for npm global installation (avoid npm list which can hang on WSL)
+    # Just check common npm global paths directly
+    local npm_global_paths=(
+        "$(npm config get prefix 2>/dev/null)/lib/node_modules/@anthropic-ai/claude-code"
+        "$HOME/.local/lib/node_modules/@anthropic-ai/claude-code"
+        "/usr/local/lib/node_modules/@anthropic-ai/claude-code"
+        "/usr/lib/node_modules/@anthropic-ai/claude-code"
+    )
+    
+    for npm_path in "${npm_global_paths[@]}"; do
+        if [ -d "$npm_path" ] 2>/dev/null; then
             found=true
             install_paths="$install_paths
-  - npm global: $npm_global_path"
+  - npm global: $npm_path"
+            break
+        fi
+    done
+    
+    # Check WSL Windows npm path
+    if [ -f /proc/version ] && grep -q "Microsoft" /proc/version 2>/dev/null; then
+        local win_npm_path="/mnt/c/Users/$(whoami)/AppData/Roaming/npm/node_modules/@anthropic-ai/claude-code"
+        if [ -d "$win_npm_path" ] 2>/dev/null; then
+            found=true
+            install_paths="$install_paths
+  - Windows npm: $win_npm_path"
         fi
     fi
     
@@ -138,10 +155,14 @@ uninstall_claude_code() {
     local existing
     existing=$(detect_existing_installation)
     
-    # Also check for npm global installation
+    # Also check for npm global installation (avoid npm list which can hang on WSL)
     local npm_global_claude=""
     if command -v npm >/dev/null 2>&1; then
-        npm_global_claude=$(npm list -g @anthropic-ai/claude-code 2>/dev/null | grep "claude-code" || true)
+        # Check common npm global paths directly instead of using npm list
+        local npm_prefix=$(npm config get prefix 2>/dev/null)
+        if [ -d "$npm_prefix/lib/node_modules/@anthropic-ai/claude-code" ] 2>/dev/null; then
+            npm_global_claude="npm: $npm_prefix/lib/node_modules/@anthropic-ai/claude-code"
+        fi
     fi
     
     if [ -z "$existing" ] && [ -z "$npm_global_claude" ]; then
