@@ -1,0 +1,146 @@
+name: Download Claude Code Offline Packages
+
+on:
+  # 手动触发
+  workflow_dispatch:
+  # 每周一自动运行检查更新
+  schedule:
+    - cron: '0 0 * * 1'
+  # 发布时触发
+  release:
+    types: [created]
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  build-offline-packages:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Claude Code globally
+        run: |
+          npm install -g @anthropic-ai/claude-code
+
+      - name: Prepare offline packages
+        run: |
+          # 创建输出目录
+          mkdir -p claude-offline-packages
+          
+          # 获取 Claude Code 版本
+          CLAUDE_VERSION=$(claude --version 2>/dev/null || echo "latest")
+          echo "CLAUDE_VERSION=$CLAUDE_VERSION" >> $GITHUB_ENV
+          echo "Claude Code version: $CLAUDE_VERSION"
+          
+          # 找到全局安装路径
+          GLOBAL_PREFIX=$(npm prefix -g)
+          echo "NPM global prefix: $GLOBAL_PREFIX"
+          
+          # 复制 node_modules 到离线包目录
+          if [ -d "$GLOBAL_PREFIX/lib/node_modules/@anthropic-ai" ]; then
+            cp -r "$GLOBAL_PREFIX/lib/node_modules/@anthropic-ai/claude-code" claude-offline-packages/
+            # 安装其他依赖
+            cd claude-offline-packages
+            npm install ./claude-code --production
+          else
+            # 备用方案：直接 npm install
+            cd claude-offline-packages
+            npm install @anthropic-ai/claude-code --production
+          fi
+          
+          # 创建 .bin 目录和链接
+          mkdir -p node_modules/.bin
+          if [ -f "claude-code/cli.js" ]; then
+            ln -sf ../claude-code/cli.js node_modules/.bin/claude
+          elif [ -f "node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+            ln -sf ../@anthropic-ai/claude-code/cli.js node_modules/.bin/claude
+          fi
+          
+          # 添加执行权限
+          chmod +x node_modules/.bin/claude 2>/dev/null || true
+          chmod +x claude-code/cli.js 2>/dev/null || true
+          chmod +x node_modules/@anthropic-ai/claude-code/cli.js 2>/dev/null || true
+
+      - name: Download VSCode extension
+        run: |
+          # 尝试下载最新版本的 VSCode 扩展
+          EXTENSION_URL=$(curl -s https://api.github.com/repos/anthropics/claude-code/releases/latest | \
+            grep "browser_download_url.*vsix" | head -1 | cut -d '"' -f 4)
+          
+          if [ -n "$EXTENSION_URL" ]; then
+            echo "Downloading VSCode extension from: $EXTENSION_URL"
+            curl -L -o claude-offline-packages/anthropic.claude-code.vsix "$EXTENSION_URL"
+          else
+            echo "No VSCode extension found in releases, skipping..."
+          fi
+        continue-on-error: true
+
+      - name: Create package info
+        run: |
+          cat > claude-offline-packages/package-info.json << EOF
+          {
+            "name": "claude-offline-packages",
+            "version": "${{ env.CLAUDE_VERSION }}",
+            "created_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "node_version": "${{ env.NODE_VERSION }}",
+            "source": "https://www.npmjs.com/package/@anthropic-ai/claude-code"
+          }
+          EOF
+
+      - name: Pack offline packages
+        run: |
+          tar -czf claude-offline-packages.tar.gz claude-offline-packages/
+          
+          # 计算校验和
+          sha256sum claude-offline-packages.tar.gz > claude-offline-packages.tar.gz.sha256
+          
+          # 显示包大小
+          ls -lh claude-offline-packages.tar.gz
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v1
+        if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ github.event.release.tag_name || format('v{0}', env.CLAUDE_VERSION) }}
+          files: |
+            claude-offline-packages.tar.gz
+            claude-offline-packages.tar.gz.sha256
+          body: |
+            Claude Code 离线安装包
+            
+            - 版本: ${{ env.CLAUDE_VERSION }}
+            - Node.js 版本: ${{ env.NODE_VERSION }}
+            - 创建时间: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+            
+            ## 使用方法
+            
+            1. 下载 `claude-offline-packages.tar.gz`
+            2. 解压到任意目录
+            3. 运行 `setup-claude-code.sh` 脚本
+            
+            ## 校验
+            
+            ```bash
+            sha256sum -c claude-offline-packages.tar.gz.sha256
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-offline-packages
+          path: |
+            claude-offline-packages.tar.gz
+            claude-offline-packages.tar.gz.sha256
+          retention-days: 30
