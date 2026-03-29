@@ -142,26 +142,29 @@ jobs:
           GLOBAL_PREFIX=$(npm prefix -g)
           echo "NPM global prefix: $GLOBAL_PREFIX"
           
-          # Check if global installation exists
+          # Copy global installation directly (don't npm install, it has publish restrictions)
           if [ -d "$GLOBAL_PREFIX/lib/node_modules/@anthropic-ai/claude-code" ]; then
             echo "Found global installation, copying..."
-            cp -r "$GLOBAL_PREFIX/lib/node_modules/@anthropic-ai/claude-code" claude-offline-packages/
-            cd claude-offline-packages
-            npm install ./claude-code --production
+            mkdir -p claude-offline-packages/node_modules/@anthropic-ai
+            cp -r "$GLOBAL_PREFIX/lib/node_modules/@anthropic-ai/claude-code" claude-offline-packages/node_modules/@anthropic-ai/
+            
+            # Also copy .bin if exists
+            if [ -d "$GLOBAL_PREFIX/lib/node_modules/.bin" ]; then
+              cp -r "$GLOBAL_PREFIX/lib/node_modules/.bin" claude-offline-packages/node_modules/
+            fi
           else
-            echo "No global installation found, installing directly..."
-            cd claude-offline-packages
-            npm install @anthropic-ai/claude-code --production
+            echo "ERROR: Global installation not found"
+            find "$GLOBAL_PREFIX" -name "claude-code" -type d 2>/dev/null || true
+            exit 1
           fi
           
-          # Create .bin directory and links
+          cd claude-offline-packages
+          
+          # Create .bin directory and links if not exist
           mkdir -p node_modules/.bin
           
-          if [ -f "claude-code/cli.js" ]; then
-            echo "Creating symlink for claude-code/cli.js"
-            ln -sf ../claude-code/cli.js node_modules/.bin/claude
-          elif [ -f "node_modules/@anthropic-ai/claude-code/cli.js" ]; then
-            echo "Creating symlink for node_modules version"
+          if [ -f "node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+            echo "Creating symlink for cli.js"
             ln -sf ../@anthropic-ai/claude-code/cli.js node_modules/.bin/claude
           else
             echo "ERROR: cli.js not found"
@@ -171,12 +174,12 @@ jobs:
           
           # Add execute permissions
           chmod +x node_modules/.bin/claude 2>/dev/null || true
-          chmod -R +x claude-code/ 2>/dev/null || true
-          chmod -R +x node_modules/@anthropic-ai/ 2>/dev/null || true
+          chmod -R +x node_modules/@anthropic-ai/claude-code/ 2>/dev/null || true
           
           echo "=== Package structure ==="
           ls -la
           ls -la node_modules/.bin/ || true
+          ls -la node_modules/@anthropic-ai/claude-code/ | head -20
 
       - name: Download VSCode extension
         run: |
