@@ -1135,6 +1135,16 @@ if [ -f "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli.js" ]; the
     chmod +x "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli.js"
 fi
 
+# Fix the claude launcher script - recreate it as a proper wrapper with absolute path
+if [ -f "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+    log_info "Creating proper launcher script..."
+    cat > "$OFFLINE_PACKAGES/node_modules/.bin/claude" << 'LAUNCHER'
+#!/usr/bin/env node
+require('../@anthropic-ai/claude-code/cli.js');
+LAUNCHER
+    chmod +x "$OFFLINE_PACKAGES/node_modules/.bin/claude"
+fi
+
 # Set binary path
 if [ -r "$OFFLINE_PACKAGES/node_modules/.bin/claude" ]; then
     CLAUDE_BIN="$OFFLINE_PACKAGES/node_modules/.bin/claude"
