@@ -27,6 +27,20 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          registry-url: 'https://registry.npmmirror.com'  # 使用国内镜像加速
+
+      - name: Configure npm mirrors
+        run: |
+          # 配置 npm 使用国内镜像
+          npm config set registry https://registry.npmmirror.com
+          
+          # 配置其他常用镜像
+          npm config set disturl https://npmmirror.com/mirrors/node
+          npm config set electron_mirror https://npmmirror.com/mirrors/electron/
+          npm config set sass_binary_site https://npmmirror.com/mirrors/node-sass/
+          npm config set phantomjs_cdnurl https://npmmirror.com/mirrors/phantomjs/
+          
+          echo "npm registry configured"
 
       - name: Install Claude Code globally
         run: |
@@ -85,6 +99,13 @@ jobs:
           fi
         continue-on-error: true
 
+      - name: Copy setup script
+        run: |
+          # 复制 setup-claude-code.sh 到离线包目录
+          cp setup-claude-code.sh claude-offline-packages/
+          chmod +x claude-offline-packages/setup-claude-code.sh
+          echo "Setup script copied to offline packages"
+
       - name: Create package info
         run: |
           cat > claude-offline-packages/package-info.json << EOF
@@ -125,8 +146,9 @@ jobs:
             ## 使用方法
             
             1. 下载 `claude-offline-packages.tar.gz`
-            2. 解压到任意目录
-            3. 运行 `setup-claude-code.sh` 脚本
+            2. 解压到任意目录：`tar -xzf claude-offline-packages.tar.gz`
+            3. 进入目录：`cd claude-offline-packages`
+            4. 运行脚本：`bash setup-claude-code.sh`
             
             ## 校验
             
