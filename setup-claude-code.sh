@@ -895,7 +895,11 @@ fi
 
 # 检测是否已安装
 echo "Checking for existing installation..."
-EXISTING_INSTALL=$(detect_existing_installation)
+# Disable 'set -e' temporarily for this function call since it returns 1 when no installation found
+set +e
+EXISTING_INSTALL=$(detect_existing_installation 2>&1)
+DETECT_EXIT=$?
+set -e
 
 if [ -n "$EXISTING_INSTALL" ]; then
     echo ""
