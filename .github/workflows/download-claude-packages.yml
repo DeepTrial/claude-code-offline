@@ -8,6 +8,10 @@ on:
         description: 'Force rebuild even if version exists'
         required: false
         default: 'false'
+      specific_version:
+        description: 'Build specific version (e.g., 2.1.79). Leave empty to use latest.'
+        required: false
+        default: ''
   # Daily check for new versions at 00:00 UTC
   # Weekly full rebuild every Monday at 00:00 UTC
   schedule:
@@ -36,19 +40,29 @@ jobs:
         run: |
           set -e
           
-          echo "=== Checking latest version from npm ==="
+          # Check if specific version was requested
+          SPECIFIC_VERSION="${{ github.event.inputs.specific_version }}"
+          FORCE_REBUILD="${{ github.event.inputs.force_rebuild }}"
           
-          # Get latest version from npm
-          NPM_RESPONSE=$(curl -s https://registry.npmjs.org/@anthropic-ai/claude-code)
-          LATEST_VERSION=$(echo "$NPM_RESPONSE" | jq -r '.["dist-tags"].latest // empty')
-          
-          if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" = "null" ]; then
-            echo "ERROR: Failed to get version from npm"
-            echo "Response: $NPM_RESPONSE"
-            exit 1
+          if [ -n "$SPECIFIC_VERSION" ]; then
+            echo "=== Building specific version: $SPECIFIC_VERSION ==="
+            LATEST_VERSION="$SPECIFIC_VERSION"
+          else
+            echo "=== Checking latest version from npm ==="
+            
+            # Get latest version from npm
+            NPM_RESPONSE=$(curl -s https://registry.npmjs.org/@anthropic-ai/claude-code)
+            LATEST_VERSION=$(echo "$NPM_RESPONSE" | jq -r '.["dist-tags"].latest // empty')
+            
+            if [ -z "$LATEST_VERSION" ] || [ "$LATEST_VERSION" = "null" ]; then
+              echo "ERROR: Failed to get version from npm"
+              echo "Response: $NPM_RESPONSE"
+              exit 1
+            fi
+            
+            echo "Latest npm version: $LATEST_VERSION"
           fi
           
-          echo "Latest npm version: $LATEST_VERSION"
           echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
           
           # Check if release already exists
@@ -63,7 +77,6 @@ jobs:
             echo "release_exists=true" >> $GITHUB_OUTPUT
             
             # Check if force rebuild
-            FORCE_REBUILD="${{ github.event.inputs.force_rebuild }}"
             if [ "$FORCE_REBUILD" = "true" ]; then
               echo "Force rebuild requested"
               echo "should_build=true" >> $GITHUB_OUTPUT
@@ -443,6 +456,57 @@ jobs:
             claude-offline-packages.tar.gz.sha256
           retention-days: 30
 
+  cleanup-old-releases:
+    needs: [check-version, build-offline-packages]
+    runs-on: ubuntu-latest
+    if: always() && needs.check-version.outputs.should_build == 'true'
+    permissions:
+      contents: write
+    steps:
+      - name: Cleanup old releases (keep latest 10)
+        run: |
+          echo "=== Cleaning up old releases (keeping latest 10) ==="
+          
+          # Get all releases sorted by creation date (newest first), exclude the latest 10
+          RELEASES_TO_DELETE=$(curl -s \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/releases?per_page=100" | \
+            jq -r '.[10:] | .[] | select(.tag_name | startswith("v")) | .id' 2>/dev/null)
+          
+          if [ -z "$RELEASES_TO_DELETE" ]; then
+            echo "No old releases to delete (less than 10 releases exist)"
+            exit 0
+          fi
+          
+          echo "Releases to delete:"
+          echo "$RELEASES_TO_DELETE"
+          
+          # Delete each old release
+          for RELEASE_ID in $RELEASES_TO_DELETE; do
+            echo "Deleting release ID: $RELEASE_ID"
+            curl -s -X DELETE \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
+            
+            # Also delete the tag
+            TAG_NAME=$(curl -s \
+              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID" | \
+              jq -r '.tag_name' 2>/dev/null)
+            if [ -n "$TAG_NAME" ] && [ "$TAG_NAME" != "null" ]; then
+              echo "Deleting tag: $TAG_NAME"
+              curl -s -X DELETE \
+                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+                -H "Accept: application/vnd.github.v3+json" \
+                "https://api.github.com/repos/${{ github.repository }}/git/refs/tags/$TAG_NAME" 2>/dev/null || true
+            fi
+          done
+          
+          echo "Cleanup completed"
+
   notify-no-build:
     needs: check-version
     runs-on: ubuntu-latest
@@ -452,3 +516,4 @@ jobs:
         run: |
           echo "Skipping build - version ${{ needs.check-version.outputs.latest_version }} already exists"
           echo "To force rebuild, trigger workflow with 'force_rebuild' set to 'true'"
+          echo "To build a specific version, use the 'specific_version' input (e.g., '2.1.79')"
