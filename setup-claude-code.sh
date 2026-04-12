@@ -1350,7 +1350,8 @@ else
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     "CLAUDE_CODE_SKIP_FIRST_RUN": "1",
     "CLAUDE_CODE_TELEMETRY": "0",
-    "DISABLE_TELEMETRY": "1"
+    "DISABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_WEB_FETCH_SKIP_SAFETY_CHECK": "1"
   },
   "autoUpdate": { "enabled": false },
   "hasCompletedOnboarding": true,
@@ -1438,7 +1439,11 @@ export CLAUDE_CODE_SKIP_FIRST_RUN=1
 # 跳过引导流程
 export CLAUDE_CODE_SKIP_ONBOARDING=1
 
-# Set API configuration (if user has configured)
+# 禁用 Web Tool 的域名安全检查（离线环境下无法连接 claude.ai 验证）
+# 这样 Web Tool 会直接获取网页内容而不需要安全检查
+export CLAUDE_CODE_WEB_FETCH_SKIP_SAFETY_CHECK=1
+
+# 设置 API 配置（如果用户已配置）
 if [ -f "$HOME/.claude/settings.json" ]; then
     # Try to read API configuration from settings.json
     if command -v jq >/dev/null 2>&1; then
