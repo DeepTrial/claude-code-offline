@@ -16,6 +16,7 @@ on:
 
 env:
   NODE_VERSION: '20'
+  NODE_VERSIONS: '18,20,22,25'
   NPM_REGISTRY: 'https://registry.npmmirror.com'
 
 jobs:
@@ -111,75 +112,114 @@ jobs:
           # Verify configuration
           echo "npm registry configured: $(npm config get registry)"
 
-      - name: Install Claude Code globally
-        run: |
-          npm install -g @anthropic-ai/claude-code
-          
-          # Verify installation
-          echo "=== Verifying installation ==="
-          which claude || echo "claude not in PATH"
-          ls -la $(npm prefix -g)/lib/node_modules/@anthropic-ai/claude-code/ || true
-          
-          CLAUDE_VERSION="${{ needs.check-version.outputs.latest_version }}"
-          echo "CLAUDE_VERSION=$CLAUDE_VERSION" >> $GITHUB_ENV
-          echo "Building Claude Code version: $CLAUDE_VERSION"
-
-      - name: Prepare offline packages
+      - name: Download packages
         run: |
           set -e
           
-          echo "=== Preparing offline packages ==="
+          echo "=== Downloading packages as tarballs ==="
           
-          # Create output directory
+          # Create working directory
           mkdir -p claude-offline-packages
+          cd claude-offline-packages
           
-          # Get Claude Code version
-          CLAUDE_VERSION="${{ needs.check-version.outputs.latest_version }}"
+          # Download packages as tarballs
+          echo "=== Downloading @anthropic-ai/claude-code ==="
+          npm pack @anthropic-ai/claude-code --pack-destination .
+          CLAUDE_TGZ=$(ls -t anthropic-ai-claude-code-*.tgz 2>/dev/null | head -1)
+          echo "Downloaded: $CLAUDE_TGZ"
+          
+          # Get installed version for release
+          CLAUDE_VERSION="$(npm view @anthropic-ai/claude-code version)"
           echo "CLAUDE_VERSION=$CLAUDE_VERSION" >> $GITHUB_ENV
           echo "Building Claude Code version: $CLAUDE_VERSION"
           
-          # Find global installation path
-          GLOBAL_PREFIX=$(npm prefix -g)
-          echo "NPM global prefix: $GLOBAL_PREFIX"
+          # Download optional dependencies that may be needed
+          echo "=== Downloading additional dependencies ==="
           
-          # Copy global installation directly (don't npm install, it has publish restrictions)
-          if [ -d "$GLOBAL_PREFIX/lib/node_modules/@anthropic-ai/claude-code" ]; then
-            echo "Found global installation, copying..."
-            mkdir -p claude-offline-packages/node_modules/@anthropic-ai
-            cp -r "$GLOBAL_PREFIX/lib/node_modules/@anthropic-ai/claude-code" claude-offline-packages/node_modules/@anthropic-ai/
-            
-            # Also copy .bin if exists
-            if [ -d "$GLOBAL_PREFIX/lib/node_modules/.bin" ]; then
-              cp -r "$GLOBAL_PREFIX/lib/node_modules/.bin" claude-offline-packages/node_modules/
-            fi
-          else
-            echo "ERROR: Global installation not found"
-            find "$GLOBAL_PREFIX" -name "claude-code" -type d 2>/dev/null || true
-            exit 1
-          fi
+          # sharp and related packages (commonly needed)
+          npm pack @img/sharp-linux-x64 --pack-destination . 2>/dev/null || echo "sharp-linux-x64 not available"
+          npm pack @img/sharp-libvips-linux-x64 --pack-destination . 2>/dev/null || echo "sharp-libvips-linux-x64 not available"
           
-          cd claude-offline-packages
+          # claude-code-router (useful tool)
+          npm pack @musistudio/claude-code-router --pack-destination . 2>/dev/null || echo "claude-code-router not available"
           
-          # Create .bin directory and links if not exist
+          echo "=== Downloaded packages ==="
+          ls -la *.tgz
+
+      - name: Extract packages to node_modules
+        run: |
+          set -e
+          cd "$GITHUB_WORKSPACE/claude-offline-packages"
+          
+          echo "=== Extracting packages to node_modules (matching 7z structure) ==="
+          
+          # Create node_modules structure
           mkdir -p node_modules/.bin
           
-          if [ -f "node_modules/@anthropic-ai/claude-code/cli.js" ]; then
-            echo "Creating symlink for cli.js"
-            ln -sf ../@anthropic-ai/claude-code/cli.js node_modules/.bin/claude
-          else
-            echo "ERROR: cli.js not found"
-            find . -name "cli.js" 2>/dev/null || true
-            exit 1
+          # Extract @anthropic-ai/claude-code
+          CLAUDE_TGZ=$(ls -t anthropic-ai-claude-code-*.tgz 2>/dev/null | head -1)
+          echo "Extracting: $CLAUDE_TGZ to node_modules/@anthropic-ai/claude-code"
+          mkdir -p node_modules/@anthropic-ai/claude-code
+          tar -xzf "$CLAUDE_TGZ" -C node_modules/@anthropic-ai/claude-code --strip-components=1
+          
+          # Extract @musistudio/claude-code-router (if exists)
+          if ls musistudio-claude-code-router-*.tgz 1>/dev/null 2>&1; then
+            ROUTER_TGZ=$(ls -t musistudio-claude-code-router-*.tgz 2>/dev/null | head -1)
+            echo "Extracting: $ROUTER_TGZ to node_modules/@musistudio/claude-code-router"
+            mkdir -p node_modules/@musistudio/claude-code-router
+            tar -xzf "$ROUTER_TGZ" -C node_modules/@musistudio/claude-code-router --strip-components=1
           fi
           
-          # Add execute permissions
-          chmod +x node_modules/.bin/claude 2>/dev/null || true
-          chmod -R +x node_modules/@anthropic-ai/claude-code/ 2>/dev/null || true
+          # Extract @img/sharp-linux-x64 (if exists)
+          if ls img-sharp-linux-x64-*.tgz 1>/dev/null 2>&1; then
+            SHARP_TGZ=$(ls -t img-sharp-linux-x64-*.tgz 2>/dev/null | head -1)
+            echo "Extracting: $SHARP_TGZ to node_modules/@img/sharp-linux-x64"
+            mkdir -p node_modules/@img/sharp-linux-x64
+            tar -xzf "$SHARP_TGZ" -C node_modules/@img/sharp-linux-x64 --strip-components=1
+          fi
           
-          echo "=== Package structure ==="
+          # Extract @img/sharp-libvips-linux-x64 (if exists)
+          if ls img-sharp-libvips-linux-x64-*.tgz 1>/dev/null 2>&1; then
+            SHARP_VIPS_TGZ=$(ls -t img-sharp-libvips-linux-x64-*.tgz 2>/dev/null | head -1)
+            echo "Extracting: $SHARP_VIPS_TGZ to node_modules/@img/sharp-libvips-linux-x64"
+            mkdir -p node_modules/@img/sharp-libvips-linux-x64
+            tar -xzf "$SHARP_VIPS_TGZ" -C node_modules/@img/sharp-libvips-linux-x64 --strip-components=1
+          fi
+          
+          # Create .bin symlinks
+          echo "=== Creating .bin symlinks ==="
+          if [ -f "node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+            ln -sf ../@anthropic-ai/claude-code/cli.js node_modules/.bin/claude
+            chmod +x node_modules/.bin/claude
+          fi
+          if [ -f "node_modules/@musistudio/claude-code-router/dist/cli.js" ]; then
+            ln -sf ../@musistudio/claude-code-router/dist/cli.js node_modules/.bin/ccr
+            chmod +x node_modules/.bin/ccr
+          fi
+          
+          # Create package.json (for reference)
+          cat > package.json << EOF
+          {
+            "name": "claude-offline-packages",
+            "version": "${CLAUDE_VERSION}",
+            "private": true,
+            "dependencies": {
+              "@anthropic-ai/claude-code": "file:${CLAUDE_TGZ}"
+            }
+          }
+          EOF
+          
+          # Create package-lock.json (empty for compatibility)
+          echo '{}' > package-lock.json
+          
+          # Create deps-full.json for reference
+          echo '{}' > deps-full.json
+          
+          echo "=== Final package structure ==="
           ls -la
-          ls -la node_modules/.bin/ || true
-          ls -la node_modules/@anthropic-ai/claude-code/ | head -20
+          echo ""
+          echo "=== node_modules structure ==="
+          find node_modules -maxdepth 3 -type d | head -30
 
       - name: Download VSCode extension
         run: |
@@ -264,14 +304,15 @@ jobs:
       - name: Create package info
         run: |
           BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-          CLAUDE_VERSION="${{ needs.check-version.outputs.latest_version }}"
+          CLAUDE_VERSION="${{ env.CLAUDE_VERSION }}"
           
           cat > claude-offline-packages/package-info.json << EOF
           {
             "name": "claude-offline-packages",
             "version": "${CLAUDE_VERSION}",
             "created_at": "${BUILD_DATE}",
-            "node_version": "${{ env.NODE_VERSION }}",
+            "node_versions_supported": "${{ env.NODE_VERSIONS }}",
+            "node_version_min": "18",
             "source": "https://www.npmjs.com/package/@anthropic-ai/claude-code",
             "github_repo": "${{ github.repository }}"
           }
@@ -279,6 +320,16 @@ jobs:
           
           echo "=== Package info ==="
           cat claude-offline-packages/package-info.json
+          
+          # Also create a node-versions.json for the setup script
+          cat > claude-offline-packages/node-versions.json << EOF
+          {
+            "min_version": 18,
+            "recommended": 20,
+            "supported": [18, 20, 22, 25],
+            "lts": [18, 20, 22]
+          }
+          EOF
 
       - name: Pack offline packages
         run: |
@@ -352,8 +403,9 @@ jobs:
             - ✅ Automatic mirror source detection
             - ✅ Region restriction bypass
             - ✅ Multi-language support (EN/ZH)
-            - ✅ Universal Node.js installation
+            - ✅ Universal Node.js installation (supports Node 18, 20, 22, 25+)
             - ✅ Uninstall support
+            - ✅ Offline .tgz package format for better compatibility
           draft: false
           prerelease: false
           files: |

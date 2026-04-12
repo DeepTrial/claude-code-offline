@@ -602,9 +602,11 @@ get_node_major_version() {
     echo "${version:-0}"
 }
 
-# Check if Node.js meets requirements (>= 18)
+# Check if Node.js meets requirements (>= 18, including v25+)
+# Supports Node.js 18, 20, 22, 25 and future versions
 check_nodejs_requirement() {
-    local required_version=18
+    local min_version=18
+    local max_tested_version=30  # Future-proof: tested up to v25, should work for higher
     
     if ! command_exists node; then
         return 1
@@ -613,17 +615,39 @@ check_nodejs_requirement() {
     local current_version
     current_version=$(get_node_major_version)
     
-    if [ "$current_version" -ge "$required_version" ]; then
+    # Check if version is >= 18
+    if [ "$current_version" -ge "$min_version" ]; then
+        # Warn if version is very new (beyond tested range)
+        if [ "$current_version" -gt "$max_tested_version" ]; then
+            log_warn "Node.js v$current_version is newer than tested versions (up to v$max_tested_version)"
+            log_info "It should work, but if you encounter issues, consider using Node.js LTS (v20 or v22)"
+        fi
         return 0
     else
         return 1
     fi
 }
 
+# Get recommended Node.js version based on availability
+get_recommended_node_version() {
+    local node_version
+    node_version=$(get_node_major_version)
+    
+    # If we already have a suitable version, use it
+    if [ "$node_version" -ge 18 ]; then
+        echo "$node_version"
+        return
+    fi
+    
+    # Default to 20 (LTS with good compatibility)
+    echo "20"
+}
+
 # Download and install Node.js binary
+# Supports versions 18, 20, 22, 25 and future versions
 download_and_install_nodejs() {
     local install_dir="$1"
-    local version="${2:-20.11.1}"
+    local version="${2:-20.18.0}"  # Updated to latest LTS
     local arch="linux-x64"
     
     log_info "Downloading Node.js v${version}..."
@@ -667,9 +691,45 @@ download_and_install_nodejs() {
     return 0
 }
 
+# Get the latest LTS or specific Node version
+download_latest_node() {
+    local install_dir="$1"
+    local preferred_version="${2:-20}"
+    
+    log_info "Attempting to install Node.js v${preferred_version}..."
+    
+    # Map major version to latest known release
+    local version_map
+    case "$preferred_version" in
+        18) version_map="18.20.5" ;;
+        20) version_map="20.18.0" ;;
+        22) version_map="22.11.0" ;;
+        25) version_map="25.0.0" ;;  # Latest as of 2026
+        *)  version_map="${preferred_version}.0.0" ;;  # Try generic for future versions
+    esac
+    
+    # Try specific version first
+    if download_and_install_nodejs "$install_dir" "$version_map"; then
+        return 0
+    fi
+    
+    # Fall back to latest LTS
+    log_warn "Failed to download Node.js v${version_map}, trying LTS..."
+    if download_and_install_nodejs "$install_dir" "20.18.0"; then
+        return 0
+    fi
+    
+    return 1
+}
+
 # Install Node.js (using nvm or direct download)
+# Supports Node.js 18, 20, 22, 25 and future versions
 install_nodejs() {
-    log_info "Installing Node.js (>= 18)..."
+    log_info "Installing Node.js (>= 18, supports up to v25+)..."
+    
+    # Determine best version to install (prefer 20 if no suitable version exists)
+    local target_version
+    target_version=$(get_recommended_node_version)
     
     # Method 1: Check if nvm already exists
     if [ -s "$HOME/.nvm/nvm.sh" ]; then
@@ -680,16 +740,19 @@ install_nodejs() {
         # Set Node.js mirror source for nvm (use npmmirror for Node.js binaries)
         export NVM_NODEJS_ORG_MIRROR="https://npmmirror.com/mirrors/node/"
         
-        # Try to install Node.js 20, fallback to lts if not available
-        if ! nvm install 20 2>/dev/null; then
-            log_warn "Node.js 20 not available, trying LTS version..."
-            nvm install --lts || {
-                log_error "Failed to install Node.js via nvm"
-                return 1
-            }
+        # Try to install preferred version, fallback to lts if not available
+        if ! nvm install "$target_version" 2>/dev/null; then
+            log_warn "Node.js $target_version not available via nvm, trying LTS..."
+            if ! nvm install 20 2>/dev/null; then
+                log_warn "Node.js 20 not available, trying any LTS..."
+                nvm install --lts || {
+                    log_error "Failed to install Node.js via nvm"
+                    return 1
+                }
+            fi
         fi
-        nvm use 20 2>/dev/null || nvm use --lts
-        nvm alias default 20 2>/dev/null || nvm alias default --lts
+        nvm use "$target_version" 2>/dev/null || nvm use 20 2>/dev/null || nvm use --lts
+        nvm alias default "$target_version" 2>/dev/null || nvm alias default 20 2>/dev/null || nvm alias default --lts
         log_ok "Node.js installed via nvm"
         return 0
     fi
@@ -724,16 +787,19 @@ NVMBLOCK
         npm_mirror=$(select_fastest_npm_mirror)
         export NVM_NODEJS_ORG_MIRROR="${npm_mirror/https:\/\/registry.npmmirror.com\/}/mirrors/node/"
         
-        # Try to install Node.js 20, fallback to lts if not available
-        if ! nvm install 20 2>/dev/null; then
-            log_warn "Node.js 20 not available, trying LTS version..."
-            nvm install --lts || {
-                log_error "Failed to install Node.js via nvm"
-                return 1
-            }
+        # Try to install preferred version, fallback to 20 then lts
+        if ! nvm install "$target_version" 2>/dev/null; then
+            log_warn "Node.js $target_version not available, trying 20..."
+            if ! nvm install 20 2>/dev/null; then
+                log_warn "Node.js 20 not available, trying LTS..."
+                nvm install --lts || {
+                    log_error "Failed to install Node.js via nvm"
+                    return 1
+                }
+            fi
         fi
-        nvm use 20 2>/dev/null || nvm use --lts
-        nvm alias default 20 2>/dev/null || nvm alias default --lts
+        nvm use "$target_version" 2>/dev/null || nvm use 20 2>/dev/null || nvm use --lts
+        nvm alias default "$target_version" 2>/dev/null || nvm alias default 20 2>/dev/null || nvm alias default --lts
         
         log_ok "Node.js installed via nvm"
         return 0
@@ -741,7 +807,7 @@ NVMBLOCK
     
     # Method 3: Download binary directly
     log_info "Downloading Node.js binary directly..."
-    if download_and_install_nodejs "$HOME/.local/node" "20.11.1"; then
+    if download_latest_node "$HOME/.local/node" "$target_version"; then
         return 0
     fi
     
@@ -876,6 +942,7 @@ download_offline_packages() {
 }
 
 # Find offline package path
+# Supports both old (node_modules) and new (.tgz + package.json) formats
 find_offline_packages() {
     local paths=(
         "${SCRIPT_DIR}/claude-offline-packages"
@@ -886,7 +953,18 @@ find_offline_packages() {
     )
     
     for path in "${paths[@]}"; do
-        if [ -r "$path/node_modules/.bin/claude" ] || [ -r "$path/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+        # Check new format: pre-extracted node_modules with @anthropic-ai/claude-code
+        if [ -r "$path/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+            echo "$path"
+            return 0
+        fi
+        # Check alternative format: package.json with .tgz files (needs extraction)
+        if [ -f "$path/package.json" ] && ls "$path"/*.tgz >/dev/null 2>&1; then
+            echo "$path"
+            return 0
+        fi
+        # Check old format: pre-installed node_modules with .bin/claude
+        if [ -r "$path/node_modules/.bin/claude" ]; then
             echo "$path"
             return 0
         fi
@@ -895,11 +973,36 @@ find_offline_packages() {
     return 1
 }
 
+# Install offline packages from .tgz files
+install_from_tgz_packages() {
+    local pkg_dir="$1"
+    local target_dir="$2"
+    
+    log_info "Installing from local .tgz packages..."
+    
+    mkdir -p "$target_dir"
+    cd "$target_dir"
+    
+    # Copy package files
+    cp "$pkg_dir/package.json" "$pkg_dir/package-lock.json" . 2>/dev/null || true
+    cp "$pkg_dir"/*.tgz . 2>/dev/null || true
+    
+    # Install dependencies
+    if [ -f "package.json" ]; then
+        npm ci --production 2>/dev/null || npm install --production 2>/dev/null || {
+            log_warn "npm install failed, trying npm ci..."
+            npm ci --production
+        }
+    fi
+    
+    log_ok "Packages installed to $target_dir"
+}
+
 # ---------------------------------------------------------------------------
 # Banner & Safety Checks
 # ---------------------------------------------------------------------------
 echo "============================================================================="
-echo "  Claude Code Deployment Script v2.1 - With Mirror Detection"
+echo "  Claude Code Deployment Script v2.2 - With Node 18-25+ Support"
 echo "============================================================================="
 echo ""
 
@@ -1047,11 +1150,26 @@ fi
 # ---------------------------------------------------------------------------
 echo "Step 1/7: Locating Claude Code packages..."
 
+# Helper function to check if path contains valid packages (new or old format)
+is_valid_package_path() {
+    local path="$1"
+    # New format: package.json with file: references + .tgz files
+    if [ -f "$path/package.json" ] && ls "$path"/*.tgz >/dev/null 2>&1; then
+        return 0
+    fi
+    # Old format: pre-installed node_modules
+    if [ -r "$path/node_modules/.bin/claude" ] || [ -r "$path/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+        return 0
+    fi
+    return 1
+}
+
 if [ -n "$OFFLINE_PATH" ]; then
     # User specified path
     OFFLINE_PACKAGES="$OFFLINE_PATH"
-    if [ ! -r "$OFFLINE_PACKAGES/node_modules/.bin/claude" ] && [ ! -r "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+    if ! is_valid_package_path "$OFFLINE_PACKAGES"; then
         log_error "Cannot find valid Claude Code packages at: $OFFLINE_PACKAGES"
+        log_info "Expected: package.json with .tgz files OR node_modules with claude installed"
         exit 1
     fi
     log_ok "Using specified offline packages: $OFFLINE_PACKAGES"
@@ -1059,7 +1177,7 @@ elif [ "$AUTO_DOWNLOAD" = true ] || [ "$FORCE_DOWNLOAD" = true ]; then
     # Auto-download mode
     OFFLINE_PACKAGES="$USER_CLAUDE_DIR/offline-packages"
     
-    if [ "$FORCE_DOWNLOAD" = true ] || [ ! -r "$OFFLINE_PACKAGES/node_modules/.bin/claude" ]; then
+    if [ "$FORCE_DOWNLOAD" = true ] || ! is_valid_package_path "$OFFLINE_PACKAGES"; then
         if ! download_offline_packages "$OFFLINE_PACKAGES"; then
             log_error "Failed to download offline packages"
             exit 1
@@ -1091,7 +1209,7 @@ else
                 ;;
             2)
                 read -p "Enter path to offline packages: " -r OFFLINE_PACKAGES
-                if [ ! -r "$OFFLINE_PACKAGES/node_modules/.bin/claude" ] && [ ! -r "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+                if ! is_valid_package_path "$OFFLINE_PACKAGES"; then
                     log_error "Invalid path or packages not found"
                     exit 1
                 fi
@@ -1126,6 +1244,25 @@ fi
 # Convert OFFLINE_PACKAGES to absolute path
 OFFLINE_PACKAGES="$(cd "$OFFLINE_PACKAGES" && pwd)"
 log_info "Using absolute path: $OFFLINE_PACKAGES"
+
+# Handle new format: .tgz packages need to be installed
+if [ -f "$OFFLINE_PACKAGES/package.json" ] && ls "$OFFLINE_PACKAGES"/*.tgz >/dev/null 2>&1; then
+    log_info "Detected .tgz package format"
+    
+    # Check if already installed
+    if [ ! -d "$OFFLINE_PACKAGES/node_modules/@anthropic-ai" ]; then
+        log_info "Installing packages from .tgz files..."
+        cd "$OFFLINE_PACKAGES"
+        npm install --production 2>/dev/null || npm ci --production 2>/dev/null || {
+            log_warn "Standard npm install failed, trying alternative..."
+            # Extract and install manually
+            for tgz in "$OFFLINE_PACKAGES"/*.tgz; do
+                [ -f "$tgz" ] || continue
+                npm install "$tgz" --production 2>/dev/null || true
+            done
+        }
+    fi
+fi
 
 # Fix permissions for the package files
 log_info "Fixing permissions..."

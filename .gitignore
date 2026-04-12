@@ -1,1 +1,4 @@
 claude-offline-packages/
+
+*.7z
+*.gz
