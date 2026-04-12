@@ -1,0 +1,172 @@
+{
+  "version": "1.0.0",
+  "description": "Claude Code Offline Skills Manifest",
+  "updated_at": "2026-04-12",
+  "skills": {
+    "docx": {
+      "name": "docx",
+      "description": "Word document creation, editing, and conversion",
+      "repo": "anthropics/skills",
+      "path": "skills/docx",
+      "category": "document",
+      "offline_compatible": true,
+      "size_estimate": "500KB",
+      "dependencies": ["pandoc", "docx-js", "LibreOffice"],
+      "files": ["SKILL.md", "REFERENCE.md", "scripts/"]
+    },
+    "pdf": {
+      "name": "pdf",
+      "description": "PDF processing, merge, split, OCR",
+      "repo": "anthropics/skills",
+      "path": "skills/pdf",
+      "category": "document",
+      "offline_compatible": true,
+      "size_estimate": "300KB",
+      "dependencies": ["pypdf", "pdf2image"],
+      "files": ["SKILL.md", "REFERENCE.md", "FORMS.md", "scripts/"]
+    },
+    "pptx": {
+      "name": "pptx",
+      "description": "PowerPoint presentation processing",
+      "repo": "anthropics/skills",
+      "path": "skills/pptx",
+      "category": "document",
+      "offline_compatible": true,
+      "size_estimate": "400KB",
+      "dependencies": ["python-pptx", "pptxgenjs", "markitdown"],
+      "files": ["SKILL.md", "editing.md", "pptxgenjs.md", "scripts/"]
+    },
+    "xlsx": {
+      "name": "xlsx",
+      "description": "Excel spreadsheet processing",
+      "repo": "anthropics/skills",
+      "path": "skills/xlsx",
+      "category": "document",
+      "offline_compatible": true,
+      "size_estimate": "350KB",
+      "dependencies": ["openpyxl", "xlsx-populate"],
+      "files": ["SKILL.md"]
+    },
+    "frontend-design": {
+      "name": "frontend-design",
+      "description": "High-quality frontend interface design guidance",
+      "repo": "anthropics/skills",
+      "path": "skills/frontend-design",
+      "category": "design",
+      "offline_compatible": true,
+      "size_estimate": "50KB",
+      "dependencies": [],
+      "files": ["SKILL.md"]
+    },
+    "algorithmic-art": {
+      "name": "algorithmic-art",
+      "description": "Algorithmic art generation",
+      "repo": "anthropics/skills",
+      "path": "skills/algorithmic-art",
+      "category": "design",
+      "offline_compatible": true,
+      "size_estimate": "30KB",
+      "dependencies": [],
+      "files": ["SKILL.md"]
+    },
+    "canvas-design": {
+      "name": "canvas-design",
+      "description": "Canvas graphics design",
+      "repo": "anthropics/skills",
+      "path": "skills/canvas-design",
+      "category": "design",
+      "offline_compatible": true,
+      "size_estimate": "40KB",
+      "dependencies": [],
+      "files": ["SKILL.md"]
+    },
+    "theme-factory": {
+      "name": "theme-factory",
+      "description": "Theme generation",
+      "repo": "anthropics/skills",
+      "path": "skills/theme-factory",
+      "category": "design",
+      "offline_compatible": true,
+      "size_estimate": "35KB",
+      "dependencies": [],
+      "files": ["SKILL.md"]
+    },
+    "web-artifacts-builder": {
+      "name": "web-artifacts-builder",
+      "description": "Web artifacts building",
+      "repo": "anthropics/skills",
+      "path": "skills/web-artifacts-builder",
+      "category": "design",
+      "offline_compatible": true,
+      "size_estimate": "45KB",
+      "dependencies": [],
+      "files": ["SKILL.md"]
+    },
+    "webapp-testing": {
+      "name": "webapp-testing",
+      "description": "Local web application testing with Playwright",
+      "repo": "anthropics/skills",
+      "path": "skills/webapp-testing",
+      "category": "testing",
+      "offline_compatible": true,
+      "size_estimate": "200KB",
+      "dependencies": ["playwright"],
+      "files": ["SKILL.md", "scripts/"]
+    },
+    "skill-creator": {
+      "name": "skill-creator",
+      "description": "Guide for creating custom skills",
+      "repo": "anthropics/skills",
+      "path": "skills/skill-creator",
+      "category": "tool",
+      "offline_compatible": true,
+      "size_estimate": "25KB",
+      "dependencies": [],
+      "files": ["SKILL.md"]
+    },
+    "brand-guidelines": {
+      "name": "brand-guidelines",
+      "description": "Brand guidelines application",
+      "repo": "anthropics/skills",
+      "path": "skills/brand-guidelines",
+      "category": "enterprise",
+      "offline_compatible": true,
+      "size_estimate": "40KB",
+      "dependencies": [],
+      "files": ["SKILL.md"]
+    },
+    "internal-comms": {
+      "name": "internal-comms",
+      "description": "Internal communications",
+      "repo": "anthropics/skills",
+      "path": "skills/internal-comms",
+      "category": "enterprise",
+      "offline_compatible": true,
+      "size_estimate": "35KB",
+      "dependencies": [],
+      "files": ["SKILL.md"]
+    },
+    "doc-coauthoring": {
+      "name": "doc-coauthoring",
+      "description": "Document coauthoring",
+      "repo": "anthropics/skills",
+      "path": "skills/doc-coauthoring",
+      "category": "enterprise",
+      "offline_compatible": true,
+      "size_estimate": "30KB",
+      "dependencies": [],
+      "files": ["SKILL.md"]
+    }
+  },
+  "excluded": {
+    "claude-api": {
+      "reason": "Requires Claude API internet access"
+    },
+    "mcp-builder": {
+      "reason": "MCP servers typically require external APIs"
+    },
+    "slack-gif-creator": {
+      "reason": "Requires Slack API internet access"
+    }
+  }
+}

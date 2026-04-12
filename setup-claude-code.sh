@@ -1615,6 +1615,45 @@ done
 echo ""
 
 # ---------------------------------------------------------------------------
+# Step 6b: Install Offline Skills (Optional)
+# ---------------------------------------------------------------------------
+echo "Step 6b/7: Installing offline skills..."
+
+SKILLS_DIR="${OFFLINE_PACKAGES}/skills"
+if [ -d "$SKILLS_DIR" ] && [ -f "$SKILLS_DIR/install-skills.sh" ]; then
+    log_info "Found offline skills package"
+    echo ""
+    echo "Offline skills are plugins that enhance Claude Code's capabilities"
+    echo "without requiring internet connection."
+    echo ""
+    echo "Available skills categories:"
+    echo "  - Document Processing: docx, pdf, pptx, xlsx"
+    echo "  - Design: frontend-design, algorithmic-art, canvas-design"
+    echo "  - Testing: webapp-testing"
+    echo "  - Tools: skill-creator"
+    echo ""
+    read -p "Install offline skills? [Y/n]: " -n 1 -r
+    echo
+    
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        if bash "$SKILLS_DIR/install-skills.sh" "$SKILLS_DIR/offline-skills"; then
+            log_ok "Offline skills installed successfully"
+        else
+            log_warn "Some skills may have failed to install"
+        fi
+    else
+        log_info "Skills installation skipped"
+        log_info "You can install later by running:"
+        log_info "  bash $SKILLS_DIR/install-skills.sh $SKILLS_DIR/offline-skills"
+    fi
+else
+    log_info "No offline skills package found in the bundle"
+    log_info "Skills can be downloaded separately if needed"
+fi
+
+echo ""
+
+# ---------------------------------------------------------------------------
 # Step 7: Summary
 # ---------------------------------------------------------------------------
 echo "Step 7/7: Setup complete!"
@@ -1632,6 +1671,13 @@ echo "    - ~/.claude/config.json"
 echo "    - ~/.claude.json (onboarding complete)"
 echo "    - PATH and TMPDIR in .bashrc"
 echo "    - ~/.claude/clean-tmp.sh (cleanup utility)"
+
+# Check if skills are installed
+if [ -d "$HOME/.claude/skills" ] && [ "$(ls -A "$HOME/.claude/skills" 2>/dev/null)" ]; then
+    echo "    - Offline skills ($(ls -1 "$HOME/.claude/skills" 2>/dev/null | wc -l) skills installed)"
+else
+    echo "    - Offline skills (not installed - see skills/ directory in the package)"
+fi
 echo ""
 echo "============================================================================="
 echo "  !!! ACTION REQUIRED !!!"
