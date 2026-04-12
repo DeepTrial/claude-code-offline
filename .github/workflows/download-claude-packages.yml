@@ -126,10 +126,12 @@ jobs:
           echo "=== Downloading @anthropic-ai/claude-code ==="
           npm pack @anthropic-ai/claude-code --pack-destination .
           CLAUDE_TGZ=$(ls -t anthropic-ai-claude-code-*.tgz 2>/dev/null | head -1)
-          echo "Downloaded: $CLAUDE_TGZ"
+          # Rename to short name (matching 7z package)
+          CLAUDE_VERSION="$(npm view @anthropic-ai/claude-code version)"
+          mv "$CLAUDE_TGZ" "claude-code-${CLAUDE_VERSION}.tgz"
+          echo "Downloaded: claude-code-${CLAUDE_VERSION}.tgz"
           
           # Get installed version for release
-          CLAUDE_VERSION="$(npm view @anthropic-ai/claude-code version)"
           echo "CLAUDE_VERSION=$CLAUDE_VERSION" >> $GITHUB_ENV
           echo "Building Claude Code version: $CLAUDE_VERSION"
           
@@ -138,12 +140,28 @@ jobs:
           
           # sharp and related packages (commonly needed)
           npm pack @img/sharp-linux-x64 --pack-destination . 2>/dev/null || echo "sharp-linux-x64 not available"
+          if ls img-sharp-linux-x64-*.tgz 1>/dev/null 2>&1; then
+            SHARP_ORIG=$(ls -t img-sharp-linux-x64-*.tgz | head -1)
+            SHARP_VER=$(echo "$SHARP_ORIG" | sed 's/img-sharp-linux-x64-//' | sed 's/.tgz//')
+            mv "$SHARP_ORIG" "sharp-linux-x64-${SHARP_VER}.tgz"
+          fi
+          
           npm pack @img/sharp-libvips-linux-x64 --pack-destination . 2>/dev/null || echo "sharp-libvips-linux-x64 not available"
+          if ls img-sharp-libvips-linux-x64-*.tgz 1>/dev/null 2>&1; then
+            SHARP_VIPS_ORIG=$(ls -t img-sharp-libvips-linux-x64-*.tgz | head -1)
+            SHARP_VIPS_VER=$(echo "$SHARP_VIPS_ORIG" | sed 's/img-sharp-libvips-linux-x64-//' | sed 's/.tgz//')
+            mv "$SHARP_VIPS_ORIG" "sharp-libvips-linux-x64-${SHARP_VIPS_VER}.tgz"
+          fi
           
           # claude-code-router (useful tool)
           npm pack @musistudio/claude-code-router --pack-destination . 2>/dev/null || echo "claude-code-router not available"
+          if ls musistudio-claude-code-router-*.tgz 1>/dev/null 2>&1; then
+            ROUTER_ORIG=$(ls -t musistudio-claude-code-router-*.tgz | head -1)
+            ROUTER_VER=$(echo "$ROUTER_ORIG" | sed 's/musistudio-claude-code-router-//' | sed 's/.tgz//')
+            mv "$ROUTER_ORIG" "claude-code-router-${ROUTER_VER}.tgz"
+          fi
           
-          echo "=== Downloaded packages ==="
+          echo "=== Downloaded packages (renamed to match 7z format) ==="
           ls -la *.tgz
 
       - name: Extract packages to node_modules
@@ -157,45 +175,47 @@ jobs:
           mkdir -p node_modules/.bin
           
           # Extract @anthropic-ai/claude-code
-          CLAUDE_TGZ=$(ls -t anthropic-ai-claude-code-*.tgz 2>/dev/null | head -1)
+          CLAUDE_TGZ=$(ls -t claude-code-*.tgz 2>/dev/null | grep -v router | head -1)
           echo "Extracting: $CLAUDE_TGZ to node_modules/@anthropic-ai/claude-code"
           mkdir -p node_modules/@anthropic-ai/claude-code
           tar -xzf "$CLAUDE_TGZ" -C node_modules/@anthropic-ai/claude-code --strip-components=1
           
           # Extract @musistudio/claude-code-router (if exists)
-          if ls musistudio-claude-code-router-*.tgz 1>/dev/null 2>&1; then
-            ROUTER_TGZ=$(ls -t musistudio-claude-code-router-*.tgz 2>/dev/null | head -1)
+          if ls claude-code-router-*.tgz 1>/dev/null 2>&1; then
+            ROUTER_TGZ=$(ls -t claude-code-router-*.tgz 2>/dev/null | head -1)
             echo "Extracting: $ROUTER_TGZ to node_modules/@musistudio/claude-code-router"
             mkdir -p node_modules/@musistudio/claude-code-router
             tar -xzf "$ROUTER_TGZ" -C node_modules/@musistudio/claude-code-router --strip-components=1
           fi
           
           # Extract @img/sharp-linux-x64 (if exists)
-          if ls img-sharp-linux-x64-*.tgz 1>/dev/null 2>&1; then
-            SHARP_TGZ=$(ls -t img-sharp-linux-x64-*.tgz 2>/dev/null | head -1)
+          if ls sharp-linux-x64-*.tgz 1>/dev/null 2>&1; then
+            SHARP_TGZ=$(ls -t sharp-linux-x64-*.tgz 2>/dev/null | head -1)
             echo "Extracting: $SHARP_TGZ to node_modules/@img/sharp-linux-x64"
             mkdir -p node_modules/@img/sharp-linux-x64
             tar -xzf "$SHARP_TGZ" -C node_modules/@img/sharp-linux-x64 --strip-components=1
           fi
           
           # Extract @img/sharp-libvips-linux-x64 (if exists)
-          if ls img-sharp-libvips-linux-x64-*.tgz 1>/dev/null 2>&1; then
-            SHARP_VIPS_TGZ=$(ls -t img-sharp-libvips-linux-x64-*.tgz 2>/dev/null | head -1)
+          if ls sharp-libvips-linux-x64-*.tgz 1>/dev/null 2>&1; then
+            SHARP_VIPS_TGZ=$(ls -t sharp-libvips-linux-x64-*.tgz 2>/dev/null | head -1)
             echo "Extracting: $SHARP_VIPS_TGZ to node_modules/@img/sharp-libvips-linux-x64"
             mkdir -p node_modules/@img/sharp-libvips-linux-x64
             tar -xzf "$SHARP_VIPS_TGZ" -C node_modules/@img/sharp-libvips-linux-x64 --strip-components=1
           fi
           
-          # Create .bin symlinks
+          # Create .bin symlinks (relative paths for portability)
           echo "=== Creating .bin symlinks ==="
-          if [ -f "node_modules/@anthropic-ai/claude-code/cli.js" ]; then
-            ln -sf ../@anthropic-ai/claude-code/cli.js node_modules/.bin/claude
-            chmod +x node_modules/.bin/claude
+          cd node_modules/.bin
+          if [ -f "../@anthropic-ai/claude-code/cli.js" ]; then
+            ln -sf ../@anthropic-ai/claude-code/cli.js claude
+            chmod +x claude
           fi
-          if [ -f "node_modules/@musistudio/claude-code-router/dist/cli.js" ]; then
-            ln -sf ../@musistudio/claude-code-router/dist/cli.js node_modules/.bin/ccr
-            chmod +x node_modules/.bin/ccr
+          if [ -f "../@musistudio/claude-code-router/dist/cli.js" ]; then
+            ln -sf ../@musistudio/claude-code-router/dist/cli.js ccr
+            chmod +x ccr
           fi
+          cd ../..
           
           # Create package.json (for reference)
           cat > package.json << EOF

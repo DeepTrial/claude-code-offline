@@ -1275,6 +1275,8 @@ fi
 # Fix the claude launcher script - recreate it as a proper wrapper with absolute path
 if [ -f "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
     log_info "Creating proper launcher script..."
+    # Remove existing symlink first to avoid overwriting the target
+    rm -f "$OFFLINE_PACKAGES/node_modules/.bin/claude"
     cat > "$OFFLINE_PACKAGES/node_modules/.bin/claude" << 'LAUNCHER'
 #!/usr/bin/env node
 require('../@anthropic-ai/claude-code/cli.js');
