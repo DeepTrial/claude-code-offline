@@ -488,10 +488,14 @@ jobs:
 
       - name: Fetch Claude Code changelog
         id: changelog
+        continue-on-error: true
         run: |
           set -e
           CLAUDE_VERSION="${{ needs.check-version.outputs.latest_version }}"
           echo "=== Fetching changelog for Claude Code v${CLAUDE_VERSION} ==="
+
+          # Install jq if not available
+          which jq || sudo apt-get install -y jq
 
           # Fetch release notes from anthropics/claude-code GitHub repo
           HTTP_CODE=$(curl -s -w "\n%{http_code}" -o /tmp/changelog_response.json \
@@ -503,7 +507,7 @@ jobs:
 
             if [ -n "$CHANGELOG_BODY" ] && [ "$CHANGELOG_BODY" != "null" ] && [ ${#CHANGELOG_BODY} -gt 5 ]; then
               # Save changelog to file for the release body step
-              echo "$CHANGELOG_BODY" > /tmp/changelog_body.md
+              printf '%s' "$CHANGELOG_BODY" > /tmp/changelog_body.md
               echo "has_changelog=true" >> $GITHUB_OUTPUT
               echo "Changelog fetched (${#CHANGELOG_BODY} chars)"
             else
@@ -530,7 +534,7 @@ jobs:
             echo ""
 
             # Append changelog if available
-            if [ "$HAS_CHANGELOG" = "true" ] && [ -f /tmp/changelog_body.md ]; then
+            if [ "$HAS_CHANGELOG" = "true" ] && [ -s /tmp/changelog_body.md ]; then
               echo "### What's New in Claude Code v${CLAUDE_VERSION}"
               echo ""
               cat /tmp/changelog_body.md
