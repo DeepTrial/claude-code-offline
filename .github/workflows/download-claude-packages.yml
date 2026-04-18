@@ -486,51 +486,101 @@ jobs:
           echo "Looking for VSCode extension in archive:"
           tar -tzf claude-offline-packages.tar.gz | grep -i "vsix" || echo "! VSCode extension not found in archive"
 
+      - name: Fetch Claude Code changelog
+        id: changelog
+        run: |
+          set -e
+          CLAUDE_VERSION="${{ needs.check-version.outputs.latest_version }}"
+          echo "=== Fetching changelog for Claude Code v${CLAUDE_VERSION} ==="
+
+          # Fetch release notes from anthropics/claude-code GitHub repo
+          HTTP_CODE=$(curl -s -w "\n%{http_code}" -o /tmp/changelog_response.json \
+            "https://api.github.com/repos/anthropics/claude-code/releases/tags/v${CLAUDE_VERSION}")
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            # Extract the release body
+            CHANGELOG_BODY=$(jq -r '.body // empty' /tmp/changelog_response.json)
+
+            if [ -n "$CHANGELOG_BODY" ] && [ "$CHANGELOG_BODY" != "null" ] && [ ${#CHANGELOG_BODY} -gt 5 ]; then
+              # Save changelog to file for the release body step
+              echo "$CHANGELOG_BODY" > /tmp/changelog_body.md
+              echo "has_changelog=true" >> $GITHUB_OUTPUT
+              echo "Changelog fetched (${#CHANGELOG_BODY} chars)"
+            else
+              echo "has_changelog=false" >> $GITHUB_OUTPUT
+              echo "Changelog body is empty"
+            fi
+          else
+            echo "has_changelog=false" >> $GITHUB_OUTPUT
+            echo "No release found on anthropics/claude-code (HTTP $HTTP_CODE)"
+          fi
+
+      - name: Generate release body
+        run: |
+          CLAUDE_VERSION="${{ needs.check-version.outputs.latest_version }}"
+          BUILD_DATE=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          HAS_CHANGELOG="${{ steps.changelog.outputs.has_changelog }}"
+
+          {
+            echo "## Claude Code Offline Package v${CLAUDE_VERSION}"
+            echo ""
+            echo "**Version:** ${CLAUDE_VERSION}"
+            echo "**Node.js:** ${{ env.NODE_VERSION }}"
+            echo "**Build Date:** ${BUILD_DATE}"
+            echo ""
+
+            # Append changelog if available
+            if [ "$HAS_CHANGELOG" = "true" ] && [ -f /tmp/changelog_body.md ]; then
+              echo "### What's New in Claude Code v${CLAUDE_VERSION}"
+              echo ""
+              cat /tmp/changelog_body.md
+              echo ""
+            fi
+
+            echo "### Downloads"
+            echo ""
+            echo "| File | Description |"
+            echo "|------|-------------|"
+            echo "| \`claude-offline-packages.tar.gz\` | Offline installation package |"
+            echo "| \`claude-offline-packages.tar.gz.sha256\` | SHA256 checksum |"
+            echo ""
+            echo "### Quick Start"
+            echo ""
+            echo '```bash'
+            echo "# 1. Download and extract"
+            echo "tar -xzf claude-offline-packages.tar.gz"
+            echo ""
+            echo "# 2. Run installer"
+            echo "cd claude-offline-packages"
+            echo "bash setup-claude-code.sh"
+            echo '```'
+            echo ""
+            echo "### Verification"
+            echo ""
+            echo '```bash'
+            echo "sha256sum -c claude-offline-packages.tar.gz.sha256"
+            echo '```'
+            echo ""
+            echo "### Features"
+            echo ""
+            echo "- ✅ Automatic mirror source detection"
+            echo "- ✅ Region restriction bypass"
+            echo "- ✅ Multi-language support (EN/ZH)"
+            echo "- ✅ Universal Node.js installation (supports Node 18, 20, 22, 25+)"
+            echo "- ✅ Uninstall support"
+            echo "- ✅ Offline .tgz package format for better compatibility"
+          } > /tmp/release_body.md
+
+          echo "=== Release body generated ==="
+          cat /tmp/release_body.md
+
       - name: Create GitHub Release
         id: create_release
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ needs.check-version.outputs.latest_version }}
           name: Claude Code v${{ needs.check-version.outputs.latest_version }}
-          body: |
-            ## Claude Code Offline Package v${{ needs.check-version.outputs.latest_version }}
-            
-            **Version:** ${{ needs.check-version.outputs.latest_version }}  
-            **Node.js:** ${{ env.NODE_VERSION }}  
-            **Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-            
-            ### Downloads
-            
-            | File | Description |
-            |------|-------------|
-            | `claude-offline-packages.tar.gz` | Offline installation package |
-            | `claude-offline-packages.tar.gz.sha256` | SHA256 checksum |
-            
-            ### Quick Start
-            
-            ```bash
-            # 1. Download and extract
-            tar -xzf claude-offline-packages.tar.gz
-            
-            # 2. Run installer
-            cd claude-offline-packages
-            bash setup-claude-code.sh
-            ```
-            
-            ### Verification
-            
-            ```bash
-            sha256sum -c claude-offline-packages.tar.gz.sha256
-            ```
-            
-            ### Features
-            
-            - ✅ Automatic mirror source detection
-            - ✅ Region restriction bypass
-            - ✅ Multi-language support (EN/ZH)
-            - ✅ Universal Node.js installation (supports Node 18, 20, 22, 25+)
-            - ✅ Uninstall support
-            - ✅ Offline .tgz package format for better compatibility
+          body_path: /tmp/release_body.md
           draft: false
           prerelease: false
           files: |
