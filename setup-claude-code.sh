@@ -1012,76 +1012,15 @@ if [ "$(id -u)" -eq 0 ]; then
     exit 1
 fi
 
-# 检测是否已安装
-echo "Checking for existing installation..."
-# Disable 'set -e' temporarily for this function call since it returns 1 when no installation found
-set +e
-EXISTING_INSTALL=$(detect_existing_installation 2>&1)
-DETECT_EXIT=$?
-set -e
-
-if [ -n "$EXISTING_INSTALL" ]; then
-    echo ""
-    log_warn "Detected existing Claude Code installation:"
-    echo "$EXISTING_INSTALL"
-    echo ""
-    echo "Options:"
-    echo "  1) Reinstall / Update (backup existing config and reinstall)"
-    echo "  2) Uninstall (completely remove Claude Code)"
-    echo "  3) Continue anyway (may cause conflicts)"
-    echo "  4) Exit"
-    echo ""
-    read -p "Select option [1-4]: " -r choice
-    
-    case $choice in
-        1)
-            echo ""
-            log_info "Backing up existing configuration and reinstalling..."
-            # 创建备份
-            BACKUP_DIR="$HOME/.claude-backup-$(date +%Y%m%d_%H%M%S)"
-            mkdir -p "$BACKUP_DIR"
-            
-            if [ -d "$HOME/.claude" ]; then
-                cp -r "$HOME/.claude" "$BACKUP_DIR/" 2>/dev/null || true
-                log_ok "Backed up ~/.claude to $BACKUP_DIR"
-            fi
-            if [ -f "$HOME/.claude.json" ]; then
-                cp "$HOME/.claude.json" "$BACKUP_DIR/" 2>/dev/null || true
-            fi
-            
-            # 清理旧的配置块（保留配置目录，会被覆盖）
-            if [ -f "$BASHRC" ]; then
-                sed -i "/$SETUP_START/,/$SETUP_END/d" "$BASHRC" 2>/dev/null || true
-                sed -i "/$NODE_START/,/$NODE_END/d" "$BASHRC" 2>/dev/null || true
-            fi
-            ;;
-        2)
-            echo ""
-            uninstall_claude_code
-            exit 0
-            ;;
-        3)
-            log_warn "Continuing with existing installation (may cause conflicts)..."
-            ;;
-        4|*)
-            log_info "Exiting. No changes made."
-            exit 0
-            ;;
-    esac
-    echo ""
-fi
-
-echo "This script will set up Claude Code on your account."
-echo "Automatic mirror source detection is enabled for better download speed."
-echo ""
-
 # ---------------------------------------------------------------------------
-# Parse Arguments
+# Parse Arguments (before interactive prompts so --help etc. work immediately)
 # ---------------------------------------------------------------------------
 OFFLINE_PATH=""
 AUTO_DOWNLOAD=false
 FORCE_DOWNLOAD=false
 SKIP_MIRROR_TEST=false
+CONFIG_ONLY=false
+SKILLS_ONLY=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -1101,6 +1040,14 @@ while [[ $# -gt 0 ]]; do
             SKIP_MIRROR_TEST=true
             shift
             ;;
+        --config-only)
+            CONFIG_ONLY=true
+            shift
+            ;;
+        --skills-only)
+            SKILLS_ONLY=true
+            shift
+            ;;
         --uninstall)
             uninstall_claude_code
             exit 0
@@ -1113,6 +1060,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --auto-download        Automatically download packages from GitHub"
             echo "  --force-download       Force re-download even if packages exist"
             echo "  --skip-mirror-test     Skip mirror speed test (use default sources)"
+            echo "  --config-only          Only generate configuration files (skip Claude installation)"
+            echo "  --skills-only          Only install offline skills"
             echo "  --help, -h             Show this help message"
             echo ""
             echo "Environment Variables:"
@@ -1124,6 +1073,8 @@ while [[ $# -gt 0 ]]; do
             echo "  $0                                    # Auto-detect or interactive mode"
             echo "  $0 --offline-path /path/to/packages   # Use specific offline packages"
             echo "  $0 --auto-download                    # Auto-download with mirror detection"
+            echo "  $0 --config-only                      # Only generate config files"
+            echo "  $0 --skills-only                      # Only install offline skills"
             echo "  NODE_MIRROR=https://... $0            # Use custom mirror"
             exit 0
             ;;
@@ -1146,8 +1097,403 @@ if [ -n "${GITHUB_MIRROR:-}" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 1: Determine Offline Packages Location
+# Handle --config-only mode (skip package installation)
 # ---------------------------------------------------------------------------
+if [ "$CONFIG_ONLY" = true ]; then
+    echo "============================================================================="
+    echo "  Configuration Only Mode"
+    echo "============================================================================="
+    echo ""
+    log_info "Generating configuration files only (skipping Claude installation)"
+    echo ""
+
+    # Step 3: Create Directory Structure
+    echo "Step 1/2: Creating ~/.claude/ directory structure..."
+
+    mkdir -p "$USER_CLAUDE_DIR"
+    mkdir -p "$USER_CLAUDE_DIR/tmp"
+    mkdir -p "$USER_CLAUDE_DIR/backups"
+    mkdir -p "$USER_CLAUDE_DIR/plugins"
+
+    log_ok "Directories created"
+    echo ""
+
+    # Step 4: Generate Config Files (inline for CONFIG_ONLY mode)
+    echo "Step 2/2: Generating configuration files..."
+
+    # --- settings.json ---
+    SETTINGS_FILE="$USER_CLAUDE_DIR/settings.json"
+    if [ -f "$SETTINGS_FILE" ]; then
+        BACKUP_NAME="settings.json.backup.$(date +%Y%m%d_%H%M%S)"
+        cp "$SETTINGS_FILE" "$USER_CLAUDE_DIR/backups/$BACKUP_NAME"
+        log_warn "settings.json already exists. Backed up to backups/$BACKUP_NAME"
+    else
+        cat > "$SETTINGS_FILE" << 'SETTINGSJSON'
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "YOUR_BASE_URL_HERE",
+    "ANTHROPIC_API_KEY": "YOUR_API_KEY_HERE",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "YOUR_MODEL_HERE",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "YOUR_MODEL_HERE",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "YOUR_MODEL_HERE",
+    "DISABLE_AUTOUPDATER": "1",
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "CLAUDE_CODE_SKIP_FIRST_RUN": "1",
+    "CLAUDE_CODE_TELEMETRY": "0",
+    "DISABLE_TELEMETRY": "1",
+    "CLAUDE_CODE_WEB_FETCH_SKIP_SAFETY_CHECK": "1"
+  },
+  "autoUpdate": { "enabled": false },
+  "hasCompletedOnboarding": true,
+  "skipOnboarding": true,
+  "telemetry": { "enabled": false }
+}
+SETTINGSJSON
+        log_ok "Created settings.json with placeholder values"
+    fi
+
+    # --- config.json ---
+    CONFIG_FILE="$USER_CLAUDE_DIR/config.json"
+    if [ -f "$CONFIG_FILE" ]; then
+        log_ok "config.json already exists"
+    else
+        cat > "$CONFIG_FILE" << 'CONFIGJSON'
+{ "primaryApiKey": "mimo" }
+CONFIGJSON
+        log_ok "Created config.json"
+    fi
+
+    # --- .claude.json ---
+    CLAUDE_JSON="$HOME/.claude.json"
+    FIRST_START=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+
+    if [ -f "$CLAUDE_JSON" ]; then
+        BACKUP_NAME=".claude.json.backup.$(date +%Y%m%d_%H%M%S)"
+        cp "$CLAUDE_JSON" "$USER_CLAUDE_DIR/backups/$BACKUP_NAME"
+
+        if command_exists python3; then
+            python3 -c "
+import json, sys
+try:
+    with open('$CLAUDE_JSON', 'r') as f:
+        data = json.load(f)
+    data['hasCompletedOnboarding'] = True
+    with open('$CLAUDE_JSON', 'w') as f:
+        json.dump(data, f, indent=2)
+except Exception as e:
+    pass
+" 2>/dev/null || true
+        elif command_exists jq; then
+            jq '.hasCompletedOnboarding = true' "$CLAUDE_JSON" > "$CLAUDE_JSON.tmp" && mv "$CLAUDE_JSON.tmp" "$CLAUDE_JSON" 2>/dev/null || true
+        fi
+        log_ok "Updated .claude.json (backed up to backups/$BACKUP_NAME)"
+    else
+        cat > "$CLAUDE_JSON" << CLAUDEJSON
+{
+  "hasCompletedOnboarding": true,
+  "firstStartTime": "$FIRST_START",
+  "skipOnboarding": true,
+  "onboardingCompleted": true,
+  "hasSeenInitialMessage": true,
+  "hasAcceptedTerms": true,
+  "telemetry": {
+    "enabled": false,
+    "consentGiven": false
+  },
+  "regionCheck": {
+    "bypassed": true,
+    "checkedAt": "$FIRST_START"
+  }
+}
+CLAUDEJSON
+        log_ok "Created .claude.json"
+    fi
+
+    # --- claude-wrapper.sh ---
+    CLAUDE_WRAPPER="$USER_CLAUDE_DIR/claude-wrapper.sh"
+    cat > "$CLAUDE_WRAPPER" << 'WRAPPER'
+#!/usr/bin/env bash
+# Claude Code Wrapper Script
+# This script sets up necessary environment variables to bypass region checks
+
+# 禁用自动更新
+export DISABLE_AUTOUPDATER=1
+
+# 禁用遥测
+export CLAUDE_CODE_TELEMETRY=0
+export DISABLE_TELEMETRY=1
+
+# 跳过首次运行检查
+export CLAUDE_CODE_SKIP_FIRST_RUN=1
+
+# 跳过引导流程
+export CLAUDE_CODE_SKIP_ONBOARDING=1
+
+# 禁用 Web Tool 的域名安全检查（离线环境下无法连接 claude.ai 验证）
+# 这样 Web Tool 会直接获取网页内容而不需要安全检查
+export CLAUDE_CODE_WEB_FETCH_SKIP_SAFETY_CHECK=1
+
+# 设置 API 配置（如果用户已配置）
+if [ -f "$HOME/.claude/settings.json" ]; then
+    # Try to read API configuration from settings.json
+    if command -v jq >/dev/null 2>&1; then
+        BASE_URL=$(jq -r '.env.ANTHROPIC_BASE_URL // empty' "$HOME/.claude/settings.json" 2>/dev/null)
+        API_KEY=$(jq -r '.env.ANTHROPIC_API_KEY // empty' "$HOME/.claude/settings.json" 2>/dev/null)
+        [ -n "$BASE_URL" ] && export ANTHROPIC_BASE_URL="$BASE_URL"
+        [ -n "$API_KEY" ] && export ANTHROPIC_API_KEY="$API_KEY"
+    fi
+fi
+
+# Execute original claude command
+exec claude "$@"
+WRAPPER
+    chmod +x "$CLAUDE_WRAPPER"
+    log_ok "Created claude-wrapper.sh"
+
+    # --- clean-tmp.sh ---
+    CLEAN_TMP_SCRIPT="$USER_CLAUDE_DIR/clean-tmp.sh"
+    cat > "$CLEAN_TMP_SCRIPT" << 'CLEANTMP'
+#!/usr/bin/env bash
+# Clean Claude Code tmp directory
+
+TMPDIR="$HOME/.claude/tmp"
+
+echo "Claude Code TMP Directory Cleaner"
+echo "=================================="
+echo ""
+
+if [ ! -d "$TMPDIR" ]; then
+    echo "TMP directory does not exist: $TMPDIR"
+    exit 0
+fi
+
+# Show current size
+SIZE=$(du -sh "$TMPDIR" 2>/dev/null | cut -f1)
+echo "Current TMP directory size: $SIZE"
+echo ""
+
+# Count files
+FILE_COUNT=$(find "$TMPDIR" -type f 2>/dev/null | wc -l)
+echo "Number of files: $FILE_COUNT"
+echo ""
+
+read -p "Do you want to clean the TMP directory? [y/N]: " -n 1 -r
+echo ""
+
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Cleanup cancelled."
+    exit 0
+fi
+
+echo ""
+echo "Select cleanup option:"
+echo "  1) Clean items older than 7 days"
+echo "  2) Clean items older than 3 days"
+echo "  3) Clean everything"
+echo ""
+read -p "Select option [1-3]: " -r option
+
+case $option in
+    1)
+        FIND_MTIME=7
+        ;;
+    2)
+        FIND_MTIME=3
+        ;;
+    3)
+        FIND_MTIME=0
+        ;;
+    *)
+        echo "Invalid option. Cancelling."
+        exit 1
+        ;;
+esac
+
+# Show what will be deleted
+echo ""
+echo "The following items will be deleted:"
+if [ "$FIND_MTIME" -eq 0 ]; then
+    find "$TMPDIR" -mindepth 1 -exec ls -ld {} \;
+else
+    find "$TMPDIR" -mindepth 1 -mtime +$FIND_MTIME -exec ls -ld {} \;
+fi
+
+echo ""
+read -p "Confirm deletion? [y/N]: " -n 1 -r
+echo ""
+
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Cleanup cancelled."
+    exit 0
+fi
+
+# Perform cleanup
+if [ "$FIND_MTIME" -eq 0 ]; then
+    rm -rf "$TMPDIR"/*
+    rm -rf "$TMPDIR"/.* 2>/dev/null || true
+else
+    find "$TMPDIR" -mindepth 1 -mtime +$FIND_MTIME -delete
+fi
+
+NEW_SIZE=$(du -sh "$TMPDIR" 2>/dev/null | cut -f1)
+echo ""
+echo "Cleanup complete. New size: $NEW_SIZE"
+CLEANTMP
+    chmod +x "$CLEAN_TMP_SCRIPT"
+    log_ok "Created clean-tmp.sh"
+
+    echo ""
+    echo "============================================================================="
+    echo "  Configuration Complete"
+    echo "============================================================================="
+    echo ""
+    echo "  Generated files:"
+    echo "    - ~/.claude/settings.json"
+    echo "    - ~/.claude/config.json"
+    echo "    - ~/.claude.json"
+    echo "    - ~/.claude/claude-wrapper.sh"
+    echo "    - ~/.claude/clean-tmp.sh"
+    echo ""
+    echo "  IMPORTANT: Edit ~/.claude/settings.json with your API credentials:"
+    echo ""
+    echo "    nano ~/.claude/settings.json"
+    echo ""
+    echo "============================================================================="
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Handle --skills-only mode
+# ---------------------------------------------------------------------------
+if [ "$SKILLS_ONLY" = true ]; then
+    echo "============================================================================="
+    echo "  Skills Installation Only Mode"
+    echo "============================================================================="
+    echo ""
+
+    # Find skills directory
+    SKILLS_DIR=""
+
+    # Check common locations
+    if [ -n "$OFFLINE_PATH" ] && [ -d "$OFFLINE_PATH/skills" ]; then
+        SKILLS_DIR="$OFFLINE_PATH/skills"
+    elif [ -d "${SCRIPT_DIR}/claude-offline-packages/skills" ]; then
+        SKILLS_DIR="${SCRIPT_DIR}/claude-offline-packages/skills"
+    elif [ -d "${SCRIPT_DIR}/skills" ]; then
+        SKILLS_DIR="${SCRIPT_DIR}/skills"
+    elif [ -d "$HOME/.claude/offline-packages/skills" ]; then
+        SKILLS_DIR="$HOME/.claude/offline-packages/skills"
+    fi
+
+    if [ -z "$SKILLS_DIR" ] || [ ! -d "$SKILLS_DIR" ]; then
+        log_error "Skills directory not found"
+        log_info "Please specify with --offline-path or run from correct directory"
+        log_info "Searched:"
+        log_info "  - \${SCRIPT_DIR}/claude-offline-packages/skills"
+        log_info "  - \${SCRIPT_DIR}/skills"
+        log_info "  - ~/.claude/offline-packages/skills"
+        exit 1
+    fi
+
+    log_info "Found skills at: $SKILLS_DIR"
+
+    if [ -f "$SKILLS_DIR/install-skills.sh" ]; then
+        log_info "Running skills installer..."
+        if bash "$SKILLS_DIR/install-skills.sh" "$SKILLS_DIR/offline-skills"; then
+            log_ok "Offline skills installed successfully"
+        else
+            log_warn "Some skills may have failed to install"
+        fi
+    else
+        log_error "Skills installer not found: $SKILLS_DIR/install-skills.sh"
+        exit 1
+    fi
+
+    echo ""
+    echo "============================================================================="
+    echo "  Skills Installation Complete"
+    echo "============================================================================="
+    echo ""
+    echo "  Installed skills to: ~/.claude/skills/"
+    echo ""
+    echo "  To use skills, simply mention them in Claude Code:"
+    echo "    Example: 'Create a Word document with...'"
+    echo "    Example: 'Design a frontend for...'"
+    echo ""
+    echo "============================================================================="
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
+# Step 1: Determine Offline Packages Location (Normal Mode)
+# ---------------------------------------------------------------------------
+
+# For normal mode: detect existing installation first (interactive prompts)
+if [ "$CONFIG_ONLY" = false ] && [ "$SKILLS_ONLY" = false ]; then
+    echo "This script will set up Claude Code on your account."
+    echo "Automatic mirror source detection is enabled for better download speed."
+    echo ""
+
+    # 检测是否已安装
+    echo "Checking for existing installation..."
+    # Disable 'set -e' temporarily for this function call since it returns 1 when no installation found
+    set +e
+    EXISTING_INSTALL=$(detect_existing_installation 2>&1)
+    DETECT_EXIT=$?
+    set -e
+
+    if [ -n "$EXISTING_INSTALL" ]; then
+        echo ""
+        log_warn "Detected existing Claude Code installation:"
+        echo "$EXISTING_INSTALL"
+        echo ""
+        echo "Options:"
+        echo "  1) Reinstall / Update (backup existing config and reinstall)"
+        echo "  2) Uninstall (completely remove Claude Code)"
+        echo "  3) Continue anyway (may cause conflicts)"
+        echo "  4) Exit"
+        echo ""
+        read -p "Select option [1-4]: " -r choice
+
+        case $choice in
+            1)
+                echo ""
+                log_info "Backing up existing configuration and reinstalling..."
+                # 创建备份
+                BACKUP_DIR="$HOME/.claude-backup-$(date +%Y%m%d_%H%M%S)"
+                mkdir -p "$BACKUP_DIR"
+
+                if [ -d "$HOME/.claude" ]; then
+                    cp -r "$HOME/.claude" "$BACKUP_DIR/" 2>/dev/null || true
+                    log_ok "Backed up ~/.claude to $BACKUP_DIR"
+                fi
+                if [ -f "$HOME/.claude.json" ]; then
+                    cp "$HOME/.claude.json" "$BACKUP_DIR/" 2>/dev/null || true
+                fi
+
+                # 清理旧的配置块（保留配置目录，会被覆盖）
+                if [ -f "$BASHRC" ]; then
+                    sed -i "/$SETUP_START/,/$SETUP_END/d" "$BASHRC" 2>/dev/null || true
+                    sed -i "/$NODE_START/,/$NODE_END/d" "$BASHRC" 2>/dev/null || true
+                fi
+                ;;
+            2)
+                echo ""
+                uninstall_claude_code
+                exit 0
+                ;;
+            3)
+                log_warn "Continuing with existing installation (may cause conflicts)..."
+                ;;
+            4|*)
+                log_info "Exiting. No changes made."
+                exit 0
+                ;;
+        esac
+        echo ""
+    fi
+fi
+
 echo "Step 1/7: Locating Claude Code packages..."
 
 # Helper function to check if path contains valid packages (new or old format)
