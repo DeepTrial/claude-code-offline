@@ -14,6 +14,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_SOURCE="${1:-${SCRIPT_DIR}/offline-skills}"
 CLAUDE_SKILLS_DIR="${HOME}/.claude/skills"
+CLAUDE_PLUGINS_DIR="${HOME}/.claude/plugins"
 MANIFEST_FILE="${SKILLS_SOURCE}/skills-manifest.json"
 
 # Colors
@@ -52,73 +53,83 @@ check_source() {
     fi
 }
 
-# Install a skill
+# Install a skill or plugin
 install_skill() {
     local skill_name="$1"
+    local skill_type="${2:-skill}"
     local source_path="${SKILLS_SOURCE}/${skill_name}"
-    local target_path="${CLAUDE_SKILLS_DIR}/${skill_name}"
-    
-    log_info "Installing skill: ${skill_name}"
-    
+
+    if [ "$skill_type" = "plugin" ]; then
+        local target_path="${CLAUDE_PLUGINS_DIR}/${skill_name}"
+        log_info "Installing plugin: ${skill_name}"
+    else
+        local target_path="${CLAUDE_SKILLS_DIR}/${skill_name}"
+        log_info "Installing skill: ${skill_name}"
+    fi
+
     # Create target directory
     mkdir -p "$target_path"
-    
-    # Copy skill files
+
+    # Copy skill/plugin files
     if cp -r "$source_path"/* "$target_path/" 2>/dev/null; then
         log_ok "  Installed to: ${target_path}"
     else
         log_warn "  Failed to copy some files"
         return 1
     fi
-    
+
     return 0
 }
 
-# Install all skills
+# Install all skills and plugins
 install_all_skills() {
     local installed=0
     local failed=0
-    
+
     log_info "Installing skills to: ${CLAUDE_SKILLS_DIR}"
-    
-    # Ensure target directory exists
+    log_info "Installing plugins to: ${CLAUDE_PLUGINS_DIR}"
+
+    # Ensure target directories exist
     mkdir -p "$CLAUDE_SKILLS_DIR"
-    
+    mkdir -p "$CLAUDE_PLUGINS_DIR"
+
     # Get list of skills from manifest or directory
-    local skills_list=()
-    
     if [ -f "$MANIFEST_FILE" ]; then
         # Use manifest
         while IFS= read -r skill_name; do
-            skills_list+=("$skill_name")
+            local skill_type
+            skill_type=$(jq -r ".skills.${skill_name}.type // \"skill\"" "$MANIFEST_FILE")
+
+            if [ -d "${SKILLS_SOURCE}/${skill_name}" ]; then
+                if install_skill "$skill_name" "$skill_type"; then
+                    ((installed++)) || true
+                else
+                    ((failed++)) || true
+                fi
+            else
+                log_warn "Skill directory not found: ${skill_name}"
+                ((failed++)) || true
+            fi
         done < <(jq -r '.skills | keys[]' "$MANIFEST_FILE")
     else
-        # Use directory listing
+        # Use directory listing - install as skills by default
         for skill_dir in "$SKILLS_SOURCE"/*/; do
             if [ -d "$skill_dir" ] && [ -f "$skill_dir/SKILL.md" ]; then
-                skills_list+=("$(basename "$skill_dir")")
+                local skill_name
+                skill_name=$(basename "$skill_dir")
+                if install_skill "$skill_name" "skill"; then
+                    ((installed++)) || true
+                else
+                    ((failed++)) || true
+                fi
             fi
         done
     fi
-    
-    # Install each skill
-    for skill_name in "${skills_list[@]}"; do
-        if [ -d "${SKILLS_SOURCE}/${skill_name}" ]; then
-            if install_skill "$skill_name"; then
-                ((installed++)) || true
-            else
-                ((failed++)) || true
-            fi
-        else
-            log_warn "Skill directory not found: ${skill_name}"
-            ((failed++)) || true
-        fi
-    done
-    
+
     log_info "============================="
-    log_ok "Installed: ${installed} skills"
+    log_ok "Installed: ${installed} items"
     if [ $failed -gt 0 ]; then
-        log_warn "Failed: ${failed} skills"
+        log_warn "Failed: ${failed} items"
     fi
 }
 
@@ -221,6 +232,10 @@ print_usage() {
         echo ""
         echo "  Enterprise:"
         jq -r '.skills | to_entries[] | select(.value.category == "enterprise") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE"
+
+        echo ""
+        echo "  Plugins:"
+        jq -r '.skills | to_entries[] | select(.value.category == "plugin") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE"
     fi
 }
 
@@ -235,6 +250,7 @@ main() {
     if [ -t 0 ]; then
         echo ""
         log_info "This will install offline skills to: ${CLAUDE_SKILLS_DIR}"
+        log_info "And plugins to: ${CLAUDE_PLUGINS_DIR}"
         read -p "Continue? [Y/n]: " -n 1 -r
         echo ""
         if [[ ! $REPLY =~ ^[Yy]$ ]] && [ -n "$REPLY" ]; then
