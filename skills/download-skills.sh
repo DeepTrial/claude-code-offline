@@ -54,24 +54,32 @@ check_deps() {
 # Download a single skill
 download_skill() {
     local skill_name="$1"
-    local skill_path="$2"
-    local skill_files="$3"
+    local skill_repo="$2"
+    local skill_path="$3"
+    local skill_files="$4"
     local output_path="${OUTPUT_DIR}/${skill_name}"
-    
-    log_info "Downloading skill: ${skill_name}"
-    
+    local branch="${GITHUB_BRANCH}"
+
+    log_info "Downloading skill: ${skill_name} (from ${skill_repo})"
+
     mkdir -p "$output_path"
-    
+
+    # Build base path for raw files
+    local base_path="$skill_path"
+    if [ -n "$base_path" ]; then
+        base_path="${base_path}/"
+    fi
+
     # Download each file/directory
     for file in $skill_files; do
-        local file_url="https://raw.githubusercontent.com/${GITHUB_REPO}/${GITHUB_BRANCH}/${skill_path}/${file}"
-        
         if [[ "$file" == */ ]]; then
             # It's a directory - need to get contents
             log_info "  Downloading directory: ${file}"
-            download_directory "$skill_path/$file" "$output_path/$file"
+            local dir_path="${base_path}${file%/}"
+            download_directory "$skill_repo" "$branch" "$dir_path" "$output_path/$file"
         else
             # It's a file
+            local file_url="https://raw.githubusercontent.com/${skill_repo}/${branch}/${base_path}${file}"
             log_info "  Downloading: ${file}"
             if curl -fsSL "$file_url" -o "$output_path/$file" 2>/dev/null; then
                 : # Success
@@ -80,19 +88,21 @@ download_skill() {
             fi
         fi
     done
-    
+
     log_ok "Skill '${skill_name}' downloaded"
 }
 
 # Download directory contents
 download_directory() {
-    local repo_path="$1"
-    local local_path="$2"
-    
+    local repo="$1"
+    local branch="$2"
+    local repo_path="$3"
+    local local_path="$4"
+
     mkdir -p "$local_path"
-    
+
     # Get directory listing from GitHub API
-    local api_url="https://api.github.com/repos/${GITHUB_REPO}/contents/${repo_path}?ref=${GITHUB_BRANCH}"
+    local api_url="https://api.github.com/repos/${repo}/contents/${repo_path}?ref=${branch}"
     local response
     
     response=$(curl -s "$api_url")
@@ -119,7 +129,7 @@ download_directory() {
             curl -fsSL "$item_download_url" -o "$local_path/$item_name" 2>/dev/null || \
                 log_warn "    Failed: ${item_name}"
         elif [ "$item_type" == "dir" ]; then
-            download_directory "$item_path" "$local_path/$item_name"
+            download_directory "$repo" "$branch" "$item_path" "$local_path/$item_name"
         fi
     done
 }
@@ -205,13 +215,15 @@ main() {
     local idx=0
     jq -r '.skills | keys[]' "$MANIFEST_FILE" | while read -r skill_name; do
         idx=$((idx + 1))
+        local skill_repo
         local skill_path
         local skill_files
-        
+
+        skill_repo=$(jq -r ".skills.${skill_name}.repo" "$MANIFEST_FILE")
         skill_path=$(jq -r ".skills.${skill_name}.path" "$MANIFEST_FILE")
         skill_files=$(jq -r ".skills.${skill_name}.files | join(\" \")" "$MANIFEST_FILE")
-        
-        download_skill "$skill_name" "$skill_path" "$skill_files"
+
+        download_skill "$skill_name" "$skill_repo" "$skill_path" "$skill_files"
     done
     
     # Create index
