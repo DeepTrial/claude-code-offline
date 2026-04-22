@@ -1,7 +1,7 @@
 {
-  "version": "1.0.0",
-  "description": "Claude Code Offline Skills Manifest",
-  "updated_at": "2026-04-12",
+  "version": "2.0.0",
+  "description": "Claude Code Offline Skills & Plugins Manifest",
+  "updated_at": "2026-04-21",
   "skills": {
     "docx": {
       "name": "docx",
@@ -156,6 +156,95 @@
       "size_estimate": "30KB",
       "dependencies": [],
       "files": ["SKILL.md"]
+    },
+    "superpowers": {
+      "name": "superpowers",
+      "description": "Agentric skills framework with TDD, debugging, brainstorming, planning, and code review workflows",
+      "repo": "obra/superpowers",
+      "path": "",
+      "category": "plugin",
+      "type": "plugin",
+      "offline_compatible": true,
+      "size_estimate": "500KB",
+      "dependencies": [],
+      "files": ["skills/", "agents/", "commands/", "hooks/", "scripts/", "CLAUDE.md", "AGENTS.md", "package.json", ".claude-plugin/"]
+    },
+    "everything-claude-code": {
+      "name": "everything-claude-code",
+      "description": "Agent harness performance optimization system with 48+ agents, 183+ skills, hooks, and rules",
+      "repo": "affaan-m/everything-claude-code",
+      "path": "",
+      "category": "plugin",
+      "type": "plugin",
+      "offline_compatible": true,
+      "size_estimate": "2MB",
+      "dependencies": [],
+      "files": ["skills/", "agents/", "commands/", "hooks/", "rules/", "mcp-configs/", "manifests/", "scripts/", ".claude-plugin/", "CLAUDE.md", "AGENTS.md", "package.json"]
+    },
+    "context7": {
+      "name": "context7",
+      "description": "Up-to-date documentation for LLMs - pulls version-specific docs into AI code editors",
+      "repo": "upstash/context7",
+      "path": "",
+      "category": "plugin",
+      "type": "plugin",
+      "offline_compatible": false,
+      "offline_note": "Requires internet access to fetch documentation from Context7 servers",
+      "size_estimate": "200KB",
+      "dependencies": [],
+      "files": [".claude-plugin/", "package.json", "README.md"]
+    },
+    "oh-my-claudecode": {
+      "name": "oh-my-claudecode",
+      "description": "Multi-agent orchestration layer for Claude Code with team, autopilot, and pipeline modes",
+      "repo": "Yeachan-Heo/oh-my-claudecode",
+      "path": "",
+      "category": "plugin",
+      "type": "plugin",
+      "offline_compatible": true,
+      "offline_note": "Plugin files are offline-compatible; agent execution requires Claude API access",
+      "size_estimate": "1MB",
+      "dependencies": [],
+      "files": ["skills/", "agents/", "missions/", "bridge/", "scripts/", "templates/", "docs/", ".claude-plugin/", "CLAUDE.md", "AGENTS.md", "package.json"]
+    },
+    "gitlab": {
+      "name": "gitlab",
+      "description": "GitLab DevOps platform integration - issues, merge requests, pipelines, and repositories",
+      "repo": "anthropics/claude-plugins-official",
+      "path": "external_plugins/gitlab",
+      "category": "plugin",
+      "type": "plugin",
+      "offline_compatible": true,
+      "offline_note": "MCP URL can be pointed to self-hosted GitLab instance",
+      "size_estimate": "10KB",
+      "dependencies": [],
+      "files": [".claude-plugin/", ".mcp.json"]
+    },
+    "clangd-lsp": {
+      "name": "clangd-lsp",
+      "description": "LLVM-based language server for C and C++ with code intelligence features",
+      "repo": "Piebald-AI/claude-code-lsps",
+      "path": "clangd",
+      "category": "plugin",
+      "type": "plugin",
+      "offline_compatible": true,
+      "offline_note": "Requires clangd binary installed locally",
+      "size_estimate": "10KB",
+      "dependencies": ["clangd"],
+      "files": ["plugin.json", ".lsp.json"]
+    },
+    "python-lsp": {
+      "name": "python-lsp",
+      "description": "Python language server using pyright with type checking and code intelligence",
+      "repo": "Piebald-AI/claude-code-lsps",
+      "path": "pyright",
+      "category": "plugin",
+      "type": "plugin",
+      "offline_compatible": true,
+      "offline_note": "Requires pyright-langserver installed via npm",
+      "size_estimate": "10KB",
+      "dependencies": ["pyright"],
+      "files": ["plugin.json", ".lsp.json"]
     }
   },
   "excluded": {
@@ -168,5 +257,12 @@
     "slack-gif-creator": {
       "reason": "Requires Slack API internet access"
     }
+  },
+  "notes": {
+    "context7": "Included but marked offline_compatible=false. Requires internet to fetch documentation.",
+    "oh-my-claudecode": "Plugin files offline-compatible, but agent execution needs Claude API.",
+    "gitlab": "MCP URL configurable - point to self-hosted GitLab for offline use.",
+    "clangd-lsp": "Config only - requires clangd binary installed on system.",
+    "python-lsp": "Config only - requires pyright-langserver installed via npm."
   }
 }
