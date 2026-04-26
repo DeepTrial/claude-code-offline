@@ -42,7 +42,7 @@ log_error() {
 
 # Check dependencies
 check_deps() {
-    local deps=("curl" "jq")
+    local deps=("curl" "jq" "git")
     for dep in "${deps[@]}"; do
         if ! command -v "$dep" &> /dev/null; then
             log_error "$dep is required but not installed"
@@ -51,7 +51,7 @@ check_deps() {
     done
 }
 
-# Download a single skill
+# Download a single skill (from anthropics/skills format)
 download_skill() {
     local skill_name="$1"
     local skill_repo="$2"
@@ -90,6 +90,74 @@ download_skill() {
     done
 
     log_ok "Skill '${skill_name}' downloaded"
+}
+
+# Download a plugin (full repo clone)
+download_plugin() {
+    local plugin_name="$1"
+    local plugin_repo="$2"
+    local plugin_path="$3"
+    local plugin_files="$4"
+    local output_path="${OUTPUT_DIR}/${plugin_name}"
+
+    log_info "Downloading plugin: ${plugin_name} (from ${plugin_repo})"
+
+    # Clone repo with shallow depth
+    local clone_dir="/tmp/${plugin_name}-clone"
+    local repo_url="https://github.com/${plugin_repo}"
+
+    log_info "  Cloning repository: ${repo_url}"
+
+    if git clone --depth 1 "$repo_url" "$clone_dir" 2>/dev/null; then
+        # Remove .git directory to reduce size
+        rm -rf "$clone_dir/.git"
+
+        # Create output directory
+        mkdir -p "$output_path"
+
+        # If path is specified, only copy that subdirectory
+        if [ -n "$plugin_path" ] && [ "$plugin_path" != "" ]; then
+            local src_dir="$clone_dir/${plugin_path}"
+            if [ -d "$src_dir" ]; then
+                log_info "  Extracting path: ${plugin_path}"
+                cp -r "$src_dir"/* "$output_path/" 2>/dev/null || true
+            else
+                log_warn "  Path ${plugin_path} not found in repo, copying root"
+                cp -r "$clone_dir"/* "$output_path/" 2>/dev/null || true
+            fi
+        else
+            # Copy specific files/directories from plugin_files
+            for file in $plugin_files; do
+                local src_item="$clone_dir/${file%/}"
+                if [[ "$file" == */ ]]; then
+                    # It's a directory
+                    if [ -d "$src_item" ]; then
+                        log_info "  Copying directory: ${file}"
+                        mkdir -p "$output_path/${file}"
+                        cp -r "$src_item"/* "$output_path/${file}/" 2>/dev/null || true
+                    else
+                        log_warn "  Directory not found: ${file}"
+                    fi
+                else
+                    # It's a file
+                    if [ -f "$src_item" ]; then
+                        log_info "  Copying file: ${file}"
+                        cp "$src_item" "$output_path/${file}" 2>/dev/null || true
+                    else
+                        log_warn "  File not found: ${file}"
+                    fi
+                fi
+            done
+        fi
+
+        # Cleanup clone directory
+        rm -rf "$clone_dir"
+        log_ok "Plugin '${plugin_name}' downloaded"
+    else
+        log_error "  Failed to clone repository: ${repo_url}"
+        rm -rf "$clone_dir"
+        return 1
+    fi
 }
 
 # Download directory contents
@@ -191,49 +259,62 @@ EOF
 
 # Main function
 main() {
-    log_info "Claude Code Skills Downloader"
-    log_info "============================="
-    
+    log_info "Claude Code Skills & Plugins Downloader"
+    log_info "======================================="
+
     check_deps
-    
+
     # Check manifest file
     if [ ! -f "$MANIFEST_FILE" ]; then
         log_error "Manifest file not found: ${MANIFEST_FILE}"
         exit 1
     fi
-    
+
     # Create output directory
     mkdir -p "$OUTPUT_DIR"
     log_info "Output directory: ${OUTPUT_DIR}"
-    
-    # Parse manifest and download skills
+
+    # Parse manifest and download skills/plugins
     local skills_count
     skills_count=$(jq -r '.skills | length' "$MANIFEST_FILE")
-    log_info "Found ${skills_count} offline-compatible skills in manifest"
-    
-    # Download each skill
-    local idx=0
-    jq -r '.skills | keys[]' "$MANIFEST_FILE" | while read -r skill_name; do
-        idx=$((idx + 1))
-        local skill_repo
-        local skill_path
-        local skill_files
+    log_info "Found ${skills_count} entries in manifest"
 
-        skill_repo=$(jq -r ".skills.${skill_name}.repo" "$MANIFEST_FILE")
-        skill_path=$(jq -r ".skills.${skill_name}.path" "$MANIFEST_FILE")
-        skill_files=$(jq -r ".skills.${skill_name}.files | join(\" \")" "$MANIFEST_FILE")
+    # Download each skill/plugin
+    jq -r '.skills | keys[]' "$MANIFEST_FILE" | while read -r entry_name; do
+        local entry_type
+        local entry_repo
+        local entry_path
+        local entry_files
+        local offline_compatible
 
-        download_skill "$skill_name" "$skill_repo" "$skill_path" "$skill_files"
+        entry_type=$(jq -r ".skills.${entry_name}.type // \"skill\"" "$MANIFEST_FILE")
+        entry_repo=$(jq -r ".skills.${entry_name}.repo" "$MANIFEST_FILE")
+        entry_path=$(jq -r ".skills.${entry_name}.path // \"\"" "$MANIFEST_FILE")
+        entry_files=$(jq -r ".skills.${entry_name}.files | join(\" \")" "$MANIFEST_FILE")
+        offline_compatible=$(jq -r ".skills.${entry_name}.offline_compatible // true" "$MANIFEST_FILE")
+
+        # Skip offline-incompatible entries
+        if [ "$offline_compatible" = "false" ]; then
+            log_warn "Skipping '${entry_name}' - offline_compatible=false"
+            continue
+        fi
+
+        # Download based on type
+        if [ "$entry_type" = "plugin" ]; then
+            download_plugin "$entry_name" "$entry_repo" "$entry_path" "$entry_files"
+        else
+            download_skill "$entry_name" "$entry_repo" "$entry_path" "$entry_files"
+        fi
     done
-    
+
     # Create index
     create_index
-    
+
     # Copy manifest
     cp "$MANIFEST_FILE" "$OUTPUT_DIR/"
-    
-    log_info "============================="
-    log_ok "All skills downloaded to: ${OUTPUT_DIR}"
+
+    log_info "======================================="
+    log_ok "All skills/plugins downloaded to: ${OUTPUT_DIR}"
     log_info "Total size: $(du -sh "$OUTPUT_DIR" | cut -f1)"
 }
 

@@ -309,96 +309,25 @@ jobs:
           fi
         continue-on-error: true
 
-      - name: Download offline skills
+      - name: Download offline skills and plugins
         run: |
-          echo "=== Downloading offline-compatible skills ==="
+          echo "=== Downloading offline-compatible skills and plugins ==="
           cd "$GITHUB_WORKSPACE"
-          
+
           # Create skills directory
           mkdir -p claude-offline-packages/skills/offline-skills
-          
-          # List of offline-compatible skills from anthropics/skills repo
-          SKILLS=(
-            "docx"
-            "pdf"
-            "pptx"
-            "xlsx"
-            "frontend-design"
-            "algorithmic-art"
-            "canvas-design"
-            "theme-factory"
-            "web-artifacts-builder"
-            "webapp-testing"
-            "skill-creator"
-            "brand-guidelines"
-            "internal-comms"
-            "doc-coauthoring"
-          )
-          
-          # Download each skill
-          for skill in "${SKILLS[@]}"; do
-            echo "Downloading skill: ${skill}"
-            skill_dir="claude-offline-packages/skills/offline-skills/${skill}"
-            mkdir -p "$skill_dir"
-            
-            # Download SKILL.md
-            curl -fsSL "https://raw.githubusercontent.com/anthropics/skills/main/skills/${skill}/SKILL.md" -o "$skill_dir/SKILL.md" 2>/dev/null || {
-              echo "  Warning: Could not download SKILL.md for ${skill}"
-              continue
-            }
-            
-            # Try to download additional files if they exist
-            for extra_file in "REFERENCE.md" "FORMS.md" "editing.md" "pptxgenjs.md"; do
-              curl -fsSL "https://raw.githubusercontent.com/anthropics/skills/main/skills/${skill}/${extra_file}" -o "$skill_dir/${extra_file}" 2>/dev/null || true
-            done
-            
-            # Try to download scripts directory
-            if curl -fsSL "https://api.github.com/repos/anthropics/skills/contents/skills/${skill}/scripts" > /tmp/scripts_check.json 2>/dev/null; then
-              if [ -s /tmp/scripts_check.json ] && echo "$(cat /tmp/scripts_check.json)" | jq -e 'type == "array"' > /dev/null 2>&1; then
-                echo "  Downloading scripts for ${skill}"
-                mkdir -p "$skill_dir/scripts"
-                echo "$(cat /tmp/scripts_check.json)" | jq -r '.[] | @base64' | while read -r script; do
-                  script_name=$(echo "$script" | base64 -d | jq -r '.name')
-                  script_download=$(echo "$script" | base64 -d | jq -r '.download_url // empty')
-                  if [ -n "$script_download" ] && [ "$script_download" != "null" ]; then
-                    curl -fsSL "$script_download" -o "$skill_dir/scripts/$script_name" 2>/dev/null || true
-                  fi
-                done
-              fi
-            fi
-            
-            echo "  Downloaded: ${skill}"
-          done
-          
+
+          # Use the download script which reads from manifest
+          # This handles both skills and plugins automatically
+          bash skills/download-skills.sh claude-offline-packages/skills/offline-skills
+
           # Copy manifest and install script
           cp skills/skills-manifest.json claude-offline-packages/skills/
           cp skills/install-skills.sh claude-offline-packages/skills/
           chmod +x claude-offline-packages/skills/install-skills.sh
-          
-          # Create skills index
-          echo "# Claude Code Offline Skills" > claude-offline-packages/skills/SKILLS-INDEX.md
-          echo "" >> claude-offline-packages/skills/SKILLS-INDEX.md
-          echo "This directory contains offline-compatible skills for Claude Code." >> claude-offline-packages/skills/SKILLS-INDEX.md
-          echo "" >> claude-offline-packages/skills/SKILLS-INDEX.md
-          echo "## Installation" >> claude-offline-packages/skills/SKILLS-INDEX.md
-          echo "" >> claude-offline-packages/skills/SKILLS-INDEX.md
-          echo 'Run the install script:' >> claude-offline-packages/skills/SKILLS-INDEX.md
-          echo '```bash' >> claude-offline-packages/skills/SKILLS-INDEX.md
-          echo 'bash skills/install-skills.sh skills/offline-skills' >> claude-offline-packages/skills/SKILLS-INDEX.md
-          echo '```' >> claude-offline-packages/skills/SKILLS-INDEX.md
-          echo "" >> claude-offline-packages/skills/SKILLS-INDEX.md
-          echo "## Available Skills" >> claude-offline-packages/skills/SKILLS-INDEX.md
-          
-          # Add skill list
-          for skill in "${SKILLS[@]}"; do
-            if [ -f "claude-offline-packages/skills/offline-skills/${skill}/SKILL.md" ]; then
-              desc=$(grep -m1 "^description:" "claude-offline-packages/skills/offline-skills/${skill}/SKILL.md" 2>/dev/null | cut -d'"' -f2 || echo "No description")
-              echo "- **${skill}**: ${desc}" >> claude-offline-packages/skills/SKILLS-INDEX.md
-            fi
-          done
-          
-          echo "=== Skills download completed ==="
-          echo "Total skills: $(ls -1 claude-offline-packages/skills/offline-skills 2>/dev/null | wc -l)"
+
+          echo "=== Skills and plugins download completed ==="
+          echo "Total entries: $(ls -1 claude-offline-packages/skills/offline-skills 2>/dev/null | wc -l)"
           du -sh claude-offline-packages/skills/
 
       - name: Copy setup script

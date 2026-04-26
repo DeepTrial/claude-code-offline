@@ -83,7 +83,8 @@ install_skill() {
 
 # Install all skills and plugins
 install_all_skills() {
-    local installed=0
+    local skills_installed=0
+    local plugins_installed=0
     local failed=0
 
     log_info "Installing skills to: ${CLAUDE_SKILLS_DIR}"
@@ -98,11 +99,23 @@ install_all_skills() {
         # Use manifest
         while IFS= read -r skill_name; do
             local skill_type
+            local offline_compatible
             skill_type=$(jq -r ".skills.${skill_name}.type // \"skill\"" "$MANIFEST_FILE")
+            offline_compatible=$(jq -r ".skills.${skill_name}.offline_compatible // true" "$MANIFEST_FILE")
+
+            # Skip offline-incompatible entries
+            if [ "$offline_compatible" = "false" ]; then
+                log_warn "Skipping '${skill_name}' - offline_compatible=false"
+                continue
+            fi
 
             if [ -d "${SKILLS_SOURCE}/${skill_name}" ]; then
                 if install_skill "$skill_name" "$skill_type"; then
-                    ((installed++)) || true
+                    if [ "$skill_type" = "plugin" ]; then
+                        ((plugins_installed++)) || true
+                    else
+                        ((skills_installed++)) || true
+                    fi
                 else
                     ((failed++)) || true
                 fi
@@ -118,7 +131,7 @@ install_all_skills() {
                 local skill_name
                 skill_name=$(basename "$skill_dir")
                 if install_skill "$skill_name" "skill"; then
-                    ((installed++)) || true
+                    ((skills_installed++)) || true
                 else
                     ((failed++)) || true
                 fi
@@ -127,9 +140,9 @@ install_all_skills() {
     fi
 
     log_info "============================="
-    log_ok "Installed: ${installed} items"
+    log_ok "Installed: ${skills_installed} skills, ${plugins_installed} plugins"
     if [ $failed -gt 0 ]; then
-        log_warn "Failed: ${failed} items"
+        log_warn "Failed: ${failed} entries"
     fi
 }
 
@@ -189,11 +202,12 @@ create_skills_config() {
     
     cat > "$config_file" << EOF
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
   "installed_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
   "source": "offline-package",
   "skills_dir": "${CLAUDE_SKILLS_DIR}",
-  "note": "These are offline-compatible skills. Some features may require additional dependencies."
+  "plugins_dir": "${CLAUDE_PLUGINS_DIR}",
+  "note": "These are offline-compatible skills and plugins. Some features may require additional dependencies."
 }
 EOF
     
@@ -202,55 +216,58 @@ EOF
 
 # Print usage information
 print_usage() {
-    log_info "Claude Code Offline Skills"
-    log_info "=========================="
+    log_info "Claude Code Offline Skills & Plugins"
+    log_info "====================================="
     log_info "Installed skills are available at: ${CLAUDE_SKILLS_DIR}"
+    log_info "Installed plugins are available at: ${CLAUDE_PLUGINS_DIR}"
     log_info ""
     log_info "To use a skill, simply mention it in Claude Code:"
     log_info "  Example: 'Create a Word document with...'"
     log_info "  Example: 'Design a frontend for...'"
     log_info ""
-    log_info "Available skills categories:"
-    
+    log_info "Plugins are automatically loaded by Claude Code."
+    log_info ""
+    log_info "Available categories:"
+
     if [ -f "$MANIFEST_FILE" ]; then
         echo ""
         echo "  Document Processing:"
-        jq -r '.skills | to_entries[] | select(.value.category == "document") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE"
-        
+        jq -r '.skills | to_entries[] | select(.value.category == "document" and .value.type != "plugin") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE" 2>/dev/null || true
+
         echo ""
         echo "  Design & Development:"
-        jq -r '.skills | to_entries[] | select(.value.category == "design") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE"
-        
+        jq -r '.skills | to_entries[] | select(.value.category == "design" and .value.type != "plugin") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE" 2>/dev/null || true
+
         echo ""
         echo "  Testing:"
-        jq -r '.skills | to_entries[] | select(.value.category == "testing") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE"
-        
+        jq -r '.skills | to_entries[] | select(.value.category == "testing" and .value.type != "plugin") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE" 2>/dev/null || true
+
         echo ""
         echo "  Tools:"
-        jq -r '.skills | to_entries[] | select(.value.category == "tool") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE"
-        
+        jq -r '.skills | to_entries[] | select(.value.category == "tool" and .value.type != "plugin") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE" 2>/dev/null || true
+
         echo ""
         echo "  Enterprise:"
-        jq -r '.skills | to_entries[] | select(.value.category == "enterprise") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE"
+        jq -r '.skills | to_entries[] | select(.value.category == "enterprise" and .value.type != "plugin") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE" 2>/dev/null || true
 
         echo ""
         echo "  Plugins:"
-        jq -r '.skills | to_entries[] | select(.value.category == "plugin") | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE"
+        jq -r '.skills | to_entries[] | select(.value.type == "plugin" and .value.offline_compatible != false) | "    - \(.key): \(.value.description)"' "$MANIFEST_FILE" 2>/dev/null || true
     fi
 }
 
 # Main function
 main() {
-    log_info "Claude Code Skills Installer"
-    log_info "============================"
-    
+    log_info "Claude Code Skills & Plugins Installer"
+    log_info "======================================="
+
     check_source
-    
+
     # Ask for confirmation
     if [ -t 0 ]; then
         echo ""
         log_info "This will install offline skills to: ${CLAUDE_SKILLS_DIR}"
-        log_info "And plugins to: ${CLAUDE_PLUGINS_DIR}"
+        log_info "This will install offline plugins to: ${CLAUDE_PLUGINS_DIR}"
         read -p "Continue? [Y/n]: " -n 1 -r
         echo ""
         if [[ ! $REPLY =~ ^[Yy]$ ]] && [ -n "$REPLY" ]; then
@@ -258,12 +275,12 @@ main() {
             exit 0
         fi
     fi
-    
+
     install_all_skills
     check_doc_dependencies
     create_skills_config
-    
-    log_info "============================"
+
+    log_info "======================================="
     log_ok "Installation completed!"
     echo ""
     print_usage
@@ -271,12 +288,12 @@ main() {
 
 # Show help
 if [ "${1:-}" == "--help" ] || [ "${1:-}" == "-h" ]; then
-    echo "Claude Code Skills Installer"
+    echo "Claude Code Skills & Plugins Installer"
     echo ""
     echo "Usage: bash install-skills.sh [skills_dir]"
     echo ""
     echo "Arguments:"
-    echo "  skills_dir    Directory containing offline skills (default: ./offline-skills/)"
+    echo "  skills_dir    Directory containing offline skills and plugins (default: ./offline-skills/)"
     echo ""
     echo "Options:"
     echo "  -h, --help    Show this help message"
