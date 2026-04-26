@@ -62,20 +62,49 @@ install_skill() {
     if [ "$skill_type" = "plugin" ]; then
         local target_path="${CLAUDE_PLUGINS_DIR}/${skill_name}"
         log_info "Installing plugin: ${skill_name}"
+
+        # Create target directory
+        mkdir -p "$target_path"
+
+        # Copy plugin files (skills, agents, commands, hooks, .claude-plugin, etc.)
+        if cp -r "$source_path"/* "$target_path/" 2>/dev/null; then
+            log_ok "  Plugin files installed to: ${target_path}"
+        else
+            log_warn "  Failed to copy plugin files"
+            return 1
+        fi
+
+        # Copy rules directory separately (plugins cannot distribute rules automatically)
+        # Rules should go to ~/.claude/rules/<plugin-name>/ to avoid conflicts
+        if [ -d "$source_path/rules" ]; then
+            local rules_target="${HOME}/.claude/rules/${skill_name}"
+            log_info "  Copying rules to: ${rules_target}"
+            mkdir -p "$rules_target"
+            # Copy each language subdirectory (common, typescript, python, etc.)
+            for rule_dir in "$source_path/rules"/*/; do
+                if [ -d "$rule_dir" ]; then
+                    local rule_subdir
+                    rule_subdir=$(basename "$rule_dir")
+                    mkdir -p "${HOME}/.claude/rules/${rule_subdir}"
+                    cp -r "$rule_dir"/* "${HOME}/.claude/rules/${rule_subdir}/" 2>/dev/null || true
+                    log_ok "    Rules: ${rule_subdir}"
+                fi
+            done
+        fi
     else
         local target_path="${CLAUDE_SKILLS_DIR}/${skill_name}"
         log_info "Installing skill: ${skill_name}"
-    fi
 
-    # Create target directory
-    mkdir -p "$target_path"
+        # Create target directory
+        mkdir -p "$target_path"
 
-    # Copy skill/plugin files
-    if cp -r "$source_path"/* "$target_path/" 2>/dev/null; then
-        log_ok "  Installed to: ${target_path}"
-    else
-        log_warn "  Failed to copy some files"
-        return 1
+        # Copy skill files
+        if cp -r "$source_path"/* "$target_path/" 2>/dev/null; then
+            log_ok "  Installed to: ${target_path}"
+        else
+            log_warn "  Failed to copy some files"
+            return 1
+        fi
     fi
 
     return 0
