@@ -100,8 +100,8 @@ install_all_skills() {
         while IFS= read -r skill_name; do
             local skill_type
             local offline_compatible
-            skill_type=$(jq -r ".skills.${skill_name}.type // \"skill\"" "$MANIFEST_FILE")
-            offline_compatible=$(jq -r ".skills.${skill_name}.offline_compatible // true" "$MANIFEST_FILE")
+            skill_type=$(jq -r ".skills[\"${skill_name}\"].type // \"skill\"" "$MANIFEST_FILE")
+            offline_compatible=$(jq -r ".skills[\"${skill_name}\"].offline_compatible // true" "$MANIFEST_FILE")
 
             # Skip offline-incompatible entries
             if [ "$offline_compatible" = "false" ]; then

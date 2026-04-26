@@ -287,11 +287,11 @@ main() {
         local entry_files
         local offline_compatible
 
-        entry_type=$(jq -r ".skills.${entry_name}.type // \"skill\"" "$MANIFEST_FILE")
-        entry_repo=$(jq -r ".skills.${entry_name}.repo" "$MANIFEST_FILE")
-        entry_path=$(jq -r ".skills.${entry_name}.path // \"\"" "$MANIFEST_FILE")
-        entry_files=$(jq -r ".skills.${entry_name}.files | join(\" \")" "$MANIFEST_FILE")
-        offline_compatible=$(jq -r ".skills.${entry_name}.offline_compatible // true" "$MANIFEST_FILE")
+        entry_type=$(jq -r ".skills[\"${entry_name}\"].type // \"skill\"" "$MANIFEST_FILE")
+        entry_repo=$(jq -r ".skills[\"${entry_name}\"].repo" "$MANIFEST_FILE")
+        entry_path=$(jq -r ".skills[\"${entry_name}\"].path // \"\"" "$MANIFEST_FILE")
+        entry_files=$(jq -r ".skills[\"${entry_name}\"].files | join(\" \")" "$MANIFEST_FILE")
+        offline_compatible=$(jq -r ".skills[\"${entry_name}\"].offline_compatible // true" "$MANIFEST_FILE")
 
         # Skip offline-incompatible entries
         if [ "$offline_compatible" = "false" ]; then
