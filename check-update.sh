@@ -81,25 +81,47 @@ compare_versions() {
 # Download latest release
 download_latest() {
     local version="$1"
-    local download_url="https://github.com/${GITHUB_REPO}/releases/download/v${version}/claude-offline-packages.tar.gz"
+    local base_url="https://github.com/${GITHUB_REPO}/releases/download/v${version}"
+    local asset_name="claude-offline-packages-linux.tar.gz"
+    local download_url="${base_url}/${asset_name}"
     local output_file="claude-offline-packages-v${version}.tar.gz"
-    
+
     log_info "Downloading Claude Code v${version}..."
     log_info "URL: ${download_url}"
-    
+
+    local download_ok=false
     if command -v wget >/dev/null 2>&1; then
-        wget --progress=bar:force --timeout=60 -O "$output_file" "$download_url"
+        wget --progress=bar:force --timeout=60 -O "$output_file" "$download_url" && download_ok=true
     elif command -v curl >/dev/null 2>&1; then
-        curl -fsSL --progress-bar --max-time 300 -o "$output_file" "$download_url"
+        curl -fsSL --progress-bar --max-time 300 -o "$output_file" "$download_url" && download_ok=true
     else
         log_error "Neither wget nor curl is available"
         return 1
     fi
-    
+
+    # Backward compatibility: releases before the platform-suffix rename
+    # used the unsuffixed asset name.
+    if [ "$download_ok" != true ]; then
+        asset_name="claude-offline-packages.tar.gz"
+        download_url="${base_url}/${asset_name}"
+        log_warn "Platform-suffixed asset not found, trying legacy name..."
+        log_info "URL: ${download_url}"
+        if command -v wget >/dev/null 2>&1; then
+            wget --progress=bar:force --timeout=60 -O "$output_file" "$download_url" && download_ok=true
+        else
+            curl -fsSL --progress-bar --max-time 300 -o "$output_file" "$download_url" && download_ok=true
+        fi
+    fi
+
+    if [ "$download_ok" != true ]; then
+        log_error "Download failed (network unreachable or asset missing)"
+        return 1
+    fi
+
     log_ok "Downloaded to: $output_file"
-    
+
     # Verify checksum if available
-    local checksum_url="https://github.com/${GITHUB_REPO}/releases/download/v${version}/claude-offline-packages.tar.gz.sha256"
+    local checksum_url="${base_url}/${asset_name}.sha256"
     local checksum_file="${output_file}.sha256"
     
     if curl -fsSL --max-time 15 -o "$checksum_file" "$checksum_url" 2>/dev/null; then

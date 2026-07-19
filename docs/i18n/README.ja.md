@@ -37,8 +37,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/DeepTrial/claude-code-offlin
 **方法 2:オフラインパッケージでインストール(ネットワーク不要)**
 
 ```bash
-# Releases から claude-offline-packages.tar.gz をダウンロードした後:
-tar -xzf claude-offline-packages.tar.gz
+# Releases から claude-offline-packages-linux.tar.gz をダウンロードした後:
+tar -xzf claude-offline-packages-linux.tar.gz
 cd claude-offline-packages
 bash setup-claude-code.sh --yes
 ```
@@ -98,7 +98,7 @@ claude --version
 
 | ファイル | プラットフォーム | 説明 |
 |----------|------------------|------|
-| `claude-offline-packages.tar.gz` | Linux x64 / WSL | 完全なオフラインパッケージ(skills、jq、VSCode 拡張機能を含む) |
+| `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | 完全なオフラインパッケージ(skills、jq、VSCode 拡張機能を含む) |
 | `claude-offline-packages-windows.zip` | Windows x64 | ネイティブ Windows パッケージ(skills、jq.exe、PS1 インストーラーを含む) |
 | `*.sha256` | - | チェックサムファイル:`sha256sum -c <file>.sha256` |
 

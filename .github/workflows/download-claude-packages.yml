@@ -602,20 +602,20 @@ jobs:
             echo "! Warning: VSCode extension not found"
           fi
           
-          tar -czf claude-offline-packages.tar.gz claude-offline-packages/
+          tar -czf claude-offline-packages-linux.tar.gz claude-offline-packages/
           
           # Calculate checksum
-          sha256sum claude-offline-packages.tar.gz > claude-offline-packages.tar.gz.sha256
+          sha256sum claude-offline-packages-linux.tar.gz > claude-offline-packages-linux.tar.gz.sha256
           
           # Show package size
           echo "Package size:"
-          ls -lh claude-offline-packages.tar.gz
-          ls -lh claude-offline-packages.tar.gz.sha256
+          ls -lh claude-offline-packages-linux.tar.gz
+          ls -lh claude-offline-packages-linux.tar.gz.sha256
           
           # Verify archive contents
           echo "=== Verifying archive contents ==="
           echo "Looking for VSCode extension in archive:"
-          tar -tzf claude-offline-packages.tar.gz | grep -i "vsix" || echo "! VSCode extension not found in archive"
+          tar -tzf claude-offline-packages-linux.tar.gz | grep -i "vsix" || echo "! VSCode extension not found in archive"
 
       - name: Fetch Claude Code changelog
         id: changelog
@@ -694,8 +694,8 @@ jobs:
             echo ""
             echo "| File | Platform | Description |"
             echo "|------|----------|-------------|"
-            echo "| \`claude-offline-packages.tar.gz\` | Linux / macOS / WSL | Offline installation package |"
-            echo "| \`claude-offline-packages.tar.gz.sha256\` | - | SHA256 checksum |"
+            echo "| \`claude-offline-packages-linux.tar.gz\` | Linux / macOS / WSL | Offline installation package |"
+            echo "| \`claude-offline-packages-linux.tar.gz.sha256\` | - | SHA256 checksum |"
             echo "| \`claude-offline-packages-windows.zip\` | Windows (native) | Offline installation package |"
             echo "| \`claude-offline-packages-windows.zip.sha256\` | - | SHA256 checksum |"
             echo ""
@@ -703,7 +703,7 @@ jobs:
             echo ""
             echo '```bash'
             echo "# 1. Download and extract"
-            echo "tar -xzf claude-offline-packages.tar.gz"
+            echo "tar -xzf claude-offline-packages-linux.tar.gz"
             echo ""
             echo "# 2. Run installer (unattended: add --yes)"
             echo "cd claude-offline-packages"
@@ -726,7 +726,7 @@ jobs:
             echo "### Verification"
             echo ""
             echo '```bash'
-            echo "sha256sum -c claude-offline-packages.tar.gz.sha256"
+            echo "sha256sum -c claude-offline-packages-linux.tar.gz.sha256"
             echo "sha256sum -c claude-offline-packages-windows.zip.sha256"
             echo '```'
             echo ""
@@ -734,7 +734,7 @@ jobs:
             echo ""
 
             # Gather package metadata
-            PKG_SIZE=$(du -sh claude-offline-packages.tar.gz 2>/dev/null | cut -f1 || echo "N/A")
+            PKG_SIZE=$(du -sh claude-offline-packages-linux.tar.gz 2>/dev/null | cut -f1 || echo "N/A")
             HAS_VSCODE=$(test -f claude-offline-packages/anthropic.claude-code.vsix && echo "✅ Included" || echo "❌ Not available")
             SKILL_COUNT=$(find claude-offline-packages/skills/offline-skills -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
             JQ_PLATFORMS=$(ls claude-offline-packages/skills/bin/ 2>/dev/null | tr '\n' ', ' | sed 's/, $//')
@@ -771,8 +771,8 @@ jobs:
         with:
           name: claude-offline-packages-v${{ needs.check-version.outputs.latest_version }}
           path: |
-            claude-offline-packages.tar.gz
-            claude-offline-packages.tar.gz.sha256
+            claude-offline-packages-linux.tar.gz
+            claude-offline-packages-linux.tar.gz.sha256
             release_body.md
           retention-days: 30
 
@@ -933,7 +933,7 @@ jobs:
         if: matrix.part == 'linux'
         run: |
           set -e
-          tar -xzf artifacts/claude-offline-packages.tar.gz -C .
+          tar -xzf artifacts/claude-offline-packages-linux.tar.gz -C .
           ls claude-offline-packages/
 
       - name: Run linux package tests
@@ -989,7 +989,7 @@ jobs:
         run: |
           set -e
           ls -lh dist/
-          for f in claude-offline-packages.tar.gz claude-offline-packages.tar.gz.sha256 \
+          for f in claude-offline-packages-linux.tar.gz claude-offline-packages-linux.tar.gz.sha256 \
                    claude-offline-packages-windows.zip claude-offline-packages-windows.zip.sha256 \
                    release_body.md; do
             if [ ! -f "dist/$f" ]; then
@@ -1009,8 +1009,8 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            dist/claude-offline-packages.tar.gz
-            dist/claude-offline-packages.tar.gz.sha256
+            dist/claude-offline-packages-linux.tar.gz
+            dist/claude-offline-packages-linux.tar.gz.sha256
             dist/claude-offline-packages-windows.zip
             dist/claude-offline-packages-windows.zip.sha256
         env:

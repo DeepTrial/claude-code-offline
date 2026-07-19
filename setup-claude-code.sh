@@ -1405,7 +1405,12 @@ download_offline_packages() {
     }
     
     local download_url
-    download_url=$(echo "$release_info" | grep "browser_download_url.*claude-offline-packages.tar.gz\"" | head -1 | cut -d '"' -f 4)
+    # Current naming: platform-suffixed asset (matches -windows.zip)
+    download_url=$(echo "$release_info" | grep "browser_download_url.*claude-offline-packages-linux.tar.gz\"" | head -1 | cut -d '"' -f 4)
+    # Backward compatibility: older releases used the unsuffixed name
+    if [ -z "$download_url" ]; then
+        download_url=$(echo "$release_info" | grep "browser_download_url.*claude-offline-packages.tar.gz\"" | head -1 | cut -d '"' -f 4)
+    fi
     
     if [ -z "$download_url" ]; then
         log_error "Could not find offline packages in latest release"

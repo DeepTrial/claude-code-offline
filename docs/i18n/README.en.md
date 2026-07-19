@@ -37,8 +37,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/DeepTrial/claude-code-offlin
 **Option 2: Offline package install (no internet needed)**
 
 ```bash
-# After downloading claude-offline-packages.tar.gz from Releases:
-tar -xzf claude-offline-packages.tar.gz
+# After downloading claude-offline-packages-linux.tar.gz from Releases:
+tar -xzf claude-offline-packages-linux.tar.gz
 cd claude-offline-packages
 bash setup-claude-code.sh --yes
 ```
@@ -98,7 +98,7 @@ claude --version
 
 | File | Platform | Description |
 |------|----------|-------------|
-| `claude-offline-packages.tar.gz` | Linux x64 / WSL | Full offline package (includes skills, jq, VSCode extensions) |
+| `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | Full offline package (includes skills, jq, VSCode extensions) |
 | `claude-offline-packages-windows.zip` | Windows x64 | Native Windows package (includes skills, jq.exe, PS1 installer) |
 | `*.sha256` | - | Checksum files: `sha256sum -c <file>.sha256` |
 

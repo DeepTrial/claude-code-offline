@@ -37,8 +37,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/DeepTrial/claude-code-offlin
 **方式 2:離線套件安裝(無需網路)**
 
 ```bash
-# 從 Releases 下載 claude-offline-packages.tar.gz 後:
-tar -xzf claude-offline-packages.tar.gz
+# 從 Releases 下載 claude-offline-packages-linux.tar.gz 後:
+tar -xzf claude-offline-packages-linux.tar.gz
 cd claude-offline-packages
 bash setup-claude-code.sh --yes
 ```
@@ -98,7 +98,7 @@ claude --version
 
 | 檔案 | 平台 | 說明 |
 |------|------|------|
-| `claude-offline-packages.tar.gz` | Linux x64 / WSL | 完整離線套件(含 skills、jq、VSCode 擴充功能) |
+| `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | 完整離線套件(含 skills、jq、VSCode 擴充功能) |
 | `claude-offline-packages-windows.zip` | Windows x64 | 原生 Windows 套件(含 skills、jq.exe、PS1 安裝程式) |
 | `*.sha256` | - | 校驗檔案:`sha256sum -c <file>.sha256` |
 

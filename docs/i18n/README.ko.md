@@ -37,8 +37,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/DeepTrial/claude-code-offlin
 **방법 2: 오프라인 패키지로 설치(네트워크 불필요)**
 
 ```bash
-# Releases에서 claude-offline-packages.tar.gz를 다운로드한 후:
-tar -xzf claude-offline-packages.tar.gz
+# Releases에서 claude-offline-packages-linux.tar.gz를 다운로드한 후:
+tar -xzf claude-offline-packages-linux.tar.gz
 cd claude-offline-packages
 bash setup-claude-code.sh --yes
 ```
@@ -98,7 +98,7 @@ claude --version
 
 | 파일 | 플랫폼 | 설명 |
 |------|--------|------|
-| `claude-offline-packages.tar.gz` | Linux x64 / WSL | 전체 오프라인 패키지(skills, jq, VSCode 확장 포함) |
+| `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | 전체 오프라인 패키지(skills, jq, VSCode 확장 포함) |
 | `claude-offline-packages-windows.zip` | Windows x64 | 네이티브 Windows 패키지(skills, jq.exe, PS1 설치 프로그램 포함) |
 | `*.sha256` | - | 체크섬 파일: `sha256sum -c <file>.sha256` |
 
