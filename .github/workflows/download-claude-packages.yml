@@ -999,56 +999,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  cleanup-old-releases:
-    needs: [check-version, create-release]
-    runs-on: ubuntu-latest
-    if: always() && needs.check-version.outputs.should_build == 'true'
-    permissions:
-      contents: write
-    steps:
-      - name: Cleanup old releases (keep latest 10)
-        run: |
-          echo "=== Cleaning up old releases (keeping latest 10) ==="
-          
-          # Get all releases sorted by creation date (newest first), exclude the latest 10
-          RELEASES_TO_DELETE=$(curl -s \
-            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            -H "Accept: application/vnd.github.v3+json" \
-            "https://api.github.com/repos/${{ github.repository }}/releases?per_page=100" | \
-            jq -r '.[10:] | .[] | select(.tag_name | startswith("v")) | .id' 2>/dev/null)
-          
-          if [ -z "$RELEASES_TO_DELETE" ]; then
-            echo "No old releases to delete (less than 10 releases exist)"
-            exit 0
-          fi
-          
-          echo "Releases to delete:"
-          echo "$RELEASES_TO_DELETE"
-          
-          # Delete each old release
-          for RELEASE_ID in $RELEASES_TO_DELETE; do
-            echo "Deleting release ID: $RELEASE_ID"
-            curl -s -X DELETE \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID"
-            
-            # Also delete the tag
-            TAG_NAME=$(curl -s \
-              -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/releases/$RELEASE_ID" | \
-              jq -r '.tag_name' 2>/dev/null)
-            if [ -n "$TAG_NAME" ] && [ "$TAG_NAME" != "null" ]; then
-              echo "Deleting tag: $TAG_NAME"
-              curl -s -X DELETE \
-                -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-                -H "Accept: application/vnd.github.v3+json" \
-                "https://api.github.com/repos/${{ github.repository }}/git/refs/tags/$TAG_NAME" 2>/dev/null || true
-            fi
-          done
-          
-          echo "Cleanup completed"
+  # NOTE: All releases are kept indefinitely (no automatic cleanup).
+  # If old releases ever need pruning, do it manually from the Releases page.
 
   notify-no-build:
     needs: check-version
