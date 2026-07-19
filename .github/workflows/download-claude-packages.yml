@@ -479,15 +479,32 @@ jobs:
           echo "All entries in offline-skills:"
           ls -1 claude-offline-packages/skills/offline-skills 2>/dev/null
           echo ""
-          echo "=== Checking for plugins ==="
-          for plugin in superpowers everything-claude-code oh-my-claudecode; do
-            if [ -d "claude-offline-packages/skills/offline-skills/$plugin" ]; then
-              SIZE=$(du -sh "claude-offline-packages/skills/offline-skills/$plugin" | cut -f1)
-              echo "  OK: $plugin ($SIZE)"
-            else
-              echo "  MISSING: $plugin"
+          echo "=== Validating bundled skills/plugins payload ==="
+          # Fail the build if any manifest entry was bundled with zero payload
+          # files (an empty directory shell would install as a broken plugin).
+          EMPTY=""
+          while IFS=$'\x1f' read -r entry_name entry_offline; do
+            # Entries marked offline_compatible=false are intentionally not bundled
+            [ "$entry_offline" = "false" ] && continue
+            d="claude-offline-packages/skills/offline-skills/$entry_name"
+            if [ ! -d "$d" ]; then
+              echo "  MISSING: $entry_name"
+              EMPTY="$EMPTY $entry_name"
+              continue
             fi
-          done
+            COUNT=$(find "$d" -type f -not -path '*/.git/*' | wc -l)
+            if [ "$COUNT" -eq 0 ]; then
+              echo "  EMPTY PAYLOAD: $entry_name"
+              EMPTY="$EMPTY $entry_name"
+            else
+              echo "  OK: $entry_name ($COUNT files, $(du -sh "$d" | cut -f1))"
+            fi
+          done < <(jq -r '.skills | to_entries[] | [.key, (if .value.offline_compatible == null then "true" elif .value.offline_compatible == false then "false" else "true" end)] | join("\u001f")' skills/skills-manifest.json)
+
+          if [ -n "$EMPTY" ]; then
+            echo "ERROR: manifest entries missing or empty in bundle:$EMPTY"
+            exit 1
+          fi
 
           # Verify manifest was copied to offline-skills
           echo ""

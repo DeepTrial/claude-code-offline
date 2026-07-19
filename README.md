@@ -129,7 +129,7 @@ bash check-update.sh --install    # 下载并安装
 
 ---
 
-## 🧩 内置离线 Skills 与 Plugins(21 个）
+## 🧩 内置离线 Skills 与 Plugins(20 个）
 
 构建时按 `skills/skills-manifest.json` 自动下载，安装器运行后装入 `~/.claude/`:
 
@@ -140,7 +140,7 @@ bash check-update.sh --install    # 下载并安装
 | **测试** | webapp-testing(Playwright) |
 | **工具** | skill-creator |
 | **企业** | brand-guidelines、internal-comms、doc-coauthoring |
-| **插件** | superpowers(TDD/调试/规划工作流框架）、everything-claude-code(48+ agents、183+ skills)、oh-my-claudecode（多智能体编排）、gitlab（可指向自建实例）、clangd-lsp、python-lsp、context7* |
+| **插件** | superpowers(TDD/调试/规划工作流框架）、everything-claude-code(ECC:67 agents、278 skills、94 命令）、gitlab（可指向自建实例）、clangd-lsp、python-lsp、context7* |
 
 > \* context7 已打包但标记为 `offline_compatible=false`（拉取文档需要联网）。clangd-lsp / python-lsp 仅含配置，需本机另有 clangd / pyright。
 

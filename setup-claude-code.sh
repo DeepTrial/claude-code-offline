@@ -2177,7 +2177,7 @@ if [ -d "$SKILLS_DIR" ] && [ -f "$SKILLS_DIR/install-skills.sh" ]; then
     echo "  - Design: frontend-design, algorithmic-art, canvas-design"
     echo "  - Testing: webapp-testing"
     echo "  - Tools: skill-creator"
-    echo "  - Plugins: superpowers, everything-claude-code, oh-my-claudecode"
+    echo "  - Plugins: superpowers, everything-claude-code (ECC), gitlab, clangd-lsp, python-lsp"
     echo ""
 
     # Check for jq dependency (required by install-skills.sh)
