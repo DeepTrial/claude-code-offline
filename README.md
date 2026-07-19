@@ -91,6 +91,8 @@ claude --version
 
 - [自动版本更新](#自动版本更新)
 - [平台支持](#平台支持)
+- [Windows Package (Native Windows)](#windows-package-native-windows)
+- [Testing the Package](#testing-the-package)
 - [镜像源自动检测](#镜像源自动检测)
 - [地区限制绕过](#地区限制绕过)
 - [高级用法](#高级用法)
@@ -202,6 +204,90 @@ fi
 "platform": "darwin-arm64"  # 原为 "linux-x64"
 ```
 
+## Windows Package (Native Windows)
+
+Each release also ships a native Windows package: `claude-offline-packages-windows.zip`.
+
+The Windows package contains the standalone `claude.exe` (Windows PE, from
+`@anthropic-ai/claude-code-win32-x64`) — **Node.js is NOT required**.
+
+### Contents
+
+```
+claude-offline-packages-windows/
+  setup-claude-code.ps1          # PowerShell installer
+  setup-claude-code.bat          # double-click friendly wrapper
+  package-info.json
+  node_modules/@anthropic-ai/claude-code/         # bin/claude.exe = real Windows binary
+  node_modules/@anthropic-ai/claude-code-win32-x64/
+  skills/                        # offline skills + jq (windows-amd64)
+```
+
+### Usage
+
+1. Download `claude-offline-packages-windows.zip` from
+   [Releases](https://github.com/DeepTrial/claude-code-offline/releases) and extract it.
+2. Double-click `setup-claude-code.bat`, **or** run in PowerShell:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\setup-claude-code.ps1 -NonInteractive
+```
+
+The installer:
+
+- validates that `bin\claude.exe` is a real binary (> 100 MB) and runs `--version`
+- creates `%USERPROFILE%\.claude\{tmp,backups,plugins}`
+- writes `settings.json` / `config.json` / `.claude.json` (existing files are
+  backed up to `.claude\backups`), with the same content as the bash installer
+- adds `<pkg>\node_modules\@anthropic-ai\claude-code\bin` to the **user PATH**
+  (registry, idempotent — re-running never duplicates the entry)
+
+Supported parameters:
+
+| Parameter | Description |
+|-----------|-------------|
+| `-OfflinePath <path>` | Use a specific extracted package directory |
+| `-AutoDownload` | Download the latest Windows package from GitHub Releases first |
+| `-NonInteractive` | Never prompt; take default answers (printed) |
+| `-Uninstall` | Remove configuration and the PATH entry (backs up config first) |
+| `-ConfigOnly` | Only (re)generate configuration files |
+
+After installation, edit `%USERPROFILE%\.claude\settings.json` with your API
+credentials and open a **new** terminal so the updated PATH is loaded.
+
+## Testing the Package
+
+The repository includes end-to-end test scripts used by CI; you can also run
+them locally against a built package.
+
+### Linux package
+
+```bash
+# Structure + version check + clean-room install in a node-less ubuntu:22.04
+# container (requires docker for the container part)
+bash tests/test-linux-package.sh /path/to/claude-offline-packages 2.1.215
+```
+
+The script asserts:
+
+- `node_modules/@anthropic-ai/claude-code/bin/claude.exe` is a real binary (> 100 MB, not a stub)
+- `node_modules/.bin/claude` exists, is executable, and is **not** a symlink
+- `node_modules/.bin/claude --version` prints the expected version
+- in a clean `ubuntu:22.04` container (no Node.js, fake HOME):
+  `bash setup-claude-code.sh --offline-path <pkg> --yes` exits 0 and
+  `claude --version` works afterwards
+
+### Windows package
+
+```powershell
+powershell -NoProfile -File tests\test-windows-package.ps1 `
+  -PackageDir .\claude-offline-packages-windows -ExpectedVersion 2.1.215
+```
+
+The script asserts the binary is real, `--version` works, the installer
+(`-NonInteractive`) exits 0, `%USERPROFILE%\.claude\settings.json` exists, and
+the user PATH registry value contains the package `bin` directory.
+
 ### Fork 后自动构建
 
 1. Fork 本仓库
@@ -293,6 +379,8 @@ bash setup-claude-code.sh --auto-download
 | `--auto-download` | 自动从 GitHub Release 下载 |
 | `--force-download` | 强制重新下载，即使本地已有包 |
 | `--skip-mirror-test` | 跳过镜像速度测试 |
+| `--yes, -y` | 所有提示自动回答 yes（完全无人值守安装） |
+| `--non-interactive` | 禁用交互，自动采用默认答案（适合脚本/CI） |
 | `--uninstall` | 卸载 Claude Code 及所有配置 |
 | `--help, -h` | 显示帮助信息 |
 
@@ -360,6 +448,39 @@ export PATH="/path/to/claude-offline-packages/node_modules/.bin:$PATH"
 1. API 密钥是否正确
 2. 网络是否可以访问配置的 `ANTHROPIC_BASE_URL`
 3. 是否需要配置代理
+
+### Network errors and offline behavior (English)
+
+- **"Network appears UNAVAILABLE ..." / "Cannot ...: network is unreachable."**
+  The setup script probes the npm registry and GitHub with a 5-second timeout
+  before any step that needs the internet (package download, Node.js install,
+  `npm install`). If you see this message it fails fast instead of hanging.
+  Check your connection/proxy (`HTTPS_PROXY`), or point the script at a mirror:
+  `NPM_MIRROR=https://registry.npmmirror.com bash setup-claude-code.sh --auto-download`.
+- **"npm registry UNREACHABLE / GitHub UNREACHABLE"** — the 5s probe to that
+  specific host timed out. Only steps requiring that host will be skipped or
+  aborted; purely offline steps continue.
+- **`'npm ...' timed out after Ns`** — an `npm install/ci` exceeded its
+  built-in timeout. Usually the registry is blocked or a proxy is required;
+  retry with `NPM_MIRROR=...`.
+
+### Running WITHOUT Node.js (English)
+
+claude-code 2.x ships a **standalone native binary** (Bun-compiled). When the
+package's `bin/claude.exe` (or the platform package binary) runs, the setup
+script prints `Native binary detected, Node.js optional` and skips the Node.js
+installation (you can still opt in). Node.js >= 18 (22 recommended) is only
+required when the package must fall back to the Node.js wrapper
+(`cli-wrapper.cjs`), e.g. when no binary exists for your platform.
+
+### Extracting the tar.gz on Windows (English)
+
+Windows extraction tools (Explorer, 7z, `tar` without privileges) **drop
+symlinks**, which breaks `node_modules/.bin/claude` from the Linux package.
+This is self-healing: `setup-claude-code.sh` always rebuilds
+`node_modules/.bin/claude` as a **real launcher script** (never a symlink) on
+every run, so simply re-run the installer inside WSL/Linux after extraction.
+For native Windows use, prefer `claude-offline-packages-windows.zip` instead.
 
 ## 许可证
 
