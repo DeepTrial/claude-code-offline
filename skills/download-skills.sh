@@ -83,13 +83,25 @@ download_entry() {
         fi
     done
 
-    # For plugins, preserve .git directory
+    # Validate payload: an entry with zero payload files is a broken bundle
+    # (e.g. upstream restructure or field mis-parse) — fail loudly instead of
+    # silently shipping an empty directory.
+    local copied
+    copied=$(find "$output_path" -type f -not -path '*/.git/*' 2>/dev/null | wc -l)
+    if [ "$copied" -eq 0 ]; then
+        log_error "  No payload files copied for ${entry_name} — refusing to ship an empty bundle"
+        rm -rf "$clone_dir"
+        return 1
+    fi
+
+    # For plugins, record the git commit SHA (small file instead of a full .git,
+    # which can add tens of MB per plugin to the shipped package)
     if [ "$entry_type" = "plugin" ] && [ -d "$clone_dir/.git" ]; then
-        cp -r "$clone_dir/.git" "$output_path/" 2>/dev/null || true
+        git -C "$clone_dir" rev-parse HEAD > "$output_path/.git-sha" 2>/dev/null || true
     fi
 
     rm -rf "$clone_dir"
-    log_ok "${entry_type} '${entry_name}' downloaded"
+    log_ok "${entry_type} '${entry_name}' downloaded (${copied} files)"
     return 0
 }
 
@@ -178,7 +190,10 @@ main() {
     local tmp_results
     tmp_results=$(mktemp)
 
-    while IFS=$'\t' read -r entry_name entry_type entry_repo entry_path entry_files offline_compatible; do
+    # NOTE: use \x1f (unit separator) instead of tab. Tab is IFS-whitespace, so
+    # consecutive empty fields (e.g. path="") would be collapsed by `read`,
+    # shifting every subsequent field and silently breaking the download.
+    while IFS=$'\x1f' read -r entry_name entry_type entry_repo entry_path entry_files offline_compatible; do
         # Skip offline-incompatible entries
         if [ "$offline_compatible" = "false" ]; then
             log_warn "Skipping '${entry_name}' - offline_compatible=false"
@@ -194,12 +209,15 @@ main() {
                 echo "fail" >> "$tmp_results"
             fi
         ) &
-    done < <($JQ_CMD -r '.skills | to_entries[] | [.key, .value.type // "skill", .value.repo, .value.path // "", (.value.files | join(" ")), (if .value.offline_compatible == null then "true" elif .value.offline_compatible == false then "false" else "true" end)] | @tsv' "$MANIFEST_FILE")
+    done < <($JQ_CMD -r '.skills | to_entries[] | [.key, .value.type // "skill", .value.repo, .value.path // "", (.value.files | join(" ")), (if .value.offline_compatible == null then "true" elif .value.offline_compatible == false then "false" else "true" end)] | join("\u001f")' "$MANIFEST_FILE")
     wait
 
-    succeeded=$(grep -c "^ok$" "$tmp_results" 2>/dev/null || echo 0)
-    failed=$(grep -c "^fail$" "$tmp_results" 2>/dev/null || echo 0)
-    skipped=$(grep -c "^skipped$" "$tmp_results" 2>/dev/null || echo 0)
+    # grep -c always prints a count (even 0); '|| true' only guards set -u/-e.
+    # ('|| echo 0' would append a second line when grep exits non-zero.)
+    succeeded=$(grep -c "^ok$" "$tmp_results" 2>/dev/null || true)
+    failed=$(grep -c "^fail$" "$tmp_results" 2>/dev/null || true)
+    skipped=$(grep -c "^skipped$" "$tmp_results" 2>/dev/null || true)
+    succeeded=${succeeded:-0}; failed=${failed:-0}; skipped=${skipped:-0}
     rm -f "$tmp_results"
 
     # Create index
@@ -212,6 +230,12 @@ main() {
     log_ok "Download completed: ${succeeded} succeeded, ${failed} failed, ${skipped} skipped"
     log_info "Output: ${OUTPUT_DIR}"
     log_info "Total size: $(du -sh "$OUTPUT_DIR" | cut -f1)"
+
+    # Fail the whole run when any entry failed, so CI does not ship broken bundles
+    if [ "$failed" -gt 0 ]; then
+        log_error "${failed} entr(y/ies) failed to download — aborting with error"
+        exit 1
+    fi
 }
 
 # Run main function

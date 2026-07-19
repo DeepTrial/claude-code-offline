@@ -171,13 +171,13 @@
     },
     "everything-claude-code": {
       "name": "everything-claude-code",
-      "description": "Agent harness performance optimization system with 48+ agents, 183+ skills, hooks, and rules",
-      "repo": "affaan-m/everything-claude-code",
+      "description": "ECC plugin: 67 agents, 278 skills, 94 command shims, hooks, rules, and production workflows",
+      "repo": "affaan-m/ECC",
       "path": "",
       "category": "plugin",
       "type": "plugin",
       "offline_compatible": true,
-      "size_estimate": "2MB",
+      "size_estimate": "20MB",
       "dependencies": [],
       "files": ["skills/", "agents/", "commands/", "hooks/", "rules/", "mcp-configs/", "manifests/", "scripts/", ".claude-plugin/", "CLAUDE.md", "AGENTS.md", "package.json"]
     },
@@ -193,19 +193,6 @@
       "size_estimate": "200KB",
       "dependencies": [],
       "files": [".claude-plugin/", "package.json", "README.md"]
-    },
-    "oh-my-claudecode": {
-      "name": "oh-my-claudecode",
-      "description": "Multi-agent orchestration layer for Claude Code with team, autopilot, and pipeline modes",
-      "repo": "Yeachan-Heo/oh-my-claudecode",
-      "path": "",
-      "category": "plugin",
-      "type": "plugin",
-      "offline_compatible": true,
-      "offline_note": "Plugin files are offline-compatible; agent execution requires Claude API access",
-      "size_estimate": "1MB",
-      "dependencies": [],
-      "files": ["skills/", "agents/", "missions/", "bridge/", "scripts/", "templates/", "docs/", ".claude-plugin/", "CLAUDE.md", "AGENTS.md", "package.json"]
     },
     "gitlab": {
       "name": "gitlab",
@@ -260,7 +247,6 @@
   },
   "notes": {
     "context7": "Included but marked offline_compatible=false. Requires internet to fetch documentation.",
-    "oh-my-claudecode": "Plugin files offline-compatible, but agent execution needs Claude API.",
     "gitlab": "MCP URL configurable - point to self-hosted GitLab for offline use.",
     "clangd-lsp": "Config only - requires clangd binary installed on system.",
     "python-lsp": "Config only - requires pyright-langserver installed via npm."

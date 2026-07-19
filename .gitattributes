@@ -1,0 +1,7 @@
+# Enforce LF line endings for scripts and CI files (Windows checkouts must not break bash)
+*.sh        text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+.gitattributes text eol=lf

@@ -90,6 +90,14 @@ install_skill() {
     local skill_type="${2:-skill}"
     local source_path="${SKILLS_SOURCE}/${skill_name}"
 
+    # Guard: never install an empty bundle (e.g. the build-time download failed
+    # and only left a directory shell). Registering it would create a broken
+    # plugin that looks installed but has no files.
+    if [ -z "$(find "$source_path" -type f -not -path '*/.git/*' 2>/dev/null | head -1)" ]; then
+        log_warn "  Skipping '${skill_name}' — no bundled payload files (build-time download may have failed)"
+        return 1
+    fi
+
     if [ "$skill_type" = "plugin" ]; then
         # Get marketplace name from manifest (repo field)
         local marketplace_name=""
@@ -97,10 +105,11 @@ install_skill() {
             marketplace_name=$($JQ_CMD -r ".skills[\"${skill_name}\"].repo // empty" "$MANIFEST_FILE" 2>/dev/null)
         fi
 
-        # Fallback to skill_name if repo not found
+        # Fallback to skill_name if repo not found; strip any owner/ prefix
         if [ -z "$marketplace_name" ]; then
             marketplace_name="$skill_name"
         fi
+        marketplace_name="${marketplace_name##*/}"
 
         # Create marketplace directory structure
         local marketplace_dir="${CLAUDE_PLUGINS_DIR}/marketplaces/${marketplace_name}"
@@ -114,17 +123,23 @@ install_skill() {
         # Create cache directory for this plugin
         mkdir -p "$cache_dir"
 
-        # Copy plugin files to cache directory
-        if cp -r "$source_path"/* "$cache_dir/" 2>/dev/null; then
+        # Copy plugin files to cache directory.
+        # Use '/.' so dotfiles (.claude-plugin/, .git-sha, .mcp.json) are
+        # included — a plain '*' glob silently skips them.
+        if cp -r "$source_path"/. "$cache_dir/" 2>/dev/null; then
             log_ok "  Plugin files installed to: ${cache_dir}"
         else
             log_warn "  Failed to copy plugin files"
             return 1
         fi
 
-        # Get git commit SHA if available
+        # Get git commit SHA if available (recorded at build time in .git-sha;
+        # fall back to a real .git for older bundles)
         local git_sha="unknown"
-        if [ -d "$cache_dir/.git" ]; then
+        if [ -f "$cache_dir/.git-sha" ]; then
+            git_sha=$(cat "$cache_dir/.git-sha")
+            log_info "  Git commit SHA: ${git_sha}"
+        elif [ -d "$cache_dir/.git" ]; then
             git_sha=$(cd "$cache_dir" && git rev-parse HEAD 2>/dev/null || echo "unknown")
             log_info "  Git commit SHA: ${git_sha}"
         fi
@@ -136,8 +151,27 @@ install_skill() {
             log_info "  Version: ${version}"
         fi
 
+        # Prefer the names declared by the plugin's own manifests. Claude Code
+        # validates the plugin key (<plugin>@<marketplace>) against these names,
+        # and they must not contain '/'.
+        local plugin_name="$skill_name"
+        if [ -f "$cache_dir/.claude-plugin/marketplace.json" ]; then
+            local declared_market declared_plugin
+            declared_market=$($JQ_CMD -r '.name // empty' "$cache_dir/.claude-plugin/marketplace.json" 2>/dev/null)
+            declared_plugin=$($JQ_CMD -r '.plugins[0].name // empty' "$cache_dir/.claude-plugin/marketplace.json" 2>/dev/null)
+            [ -n "$declared_market" ] && marketplace_name="$declared_market"
+            [ -n "$declared_plugin" ] && plugin_name="$declared_plugin"
+        elif [ -f "$cache_dir/.claude-plugin/plugin.json" ]; then
+            local declared_name
+            declared_name=$($JQ_CMD -r '.name // empty' "$cache_dir/.claude-plugin/plugin.json" 2>/dev/null)
+            [ -n "$declared_name" ] && plugin_name="$declared_name"
+        fi
+        marketplace_name="${marketplace_name//\//-}"
+        plugin_name="${plugin_name//\//-}"
+        log_info "  Registering as: ${plugin_name}@${marketplace_name}"
+
         # Register plugin in installed_plugins.json
-        register_plugin "$marketplace_name" "$skill_name" "$version" "$git_sha" "$cache_dir"
+        register_plugin "$marketplace_name" "$plugin_name" "$version" "$git_sha" "$cache_dir"
 
         # Register marketplace in known_marketplaces.json
         register_marketplace "$marketplace_name" "$marketplace_dir"
@@ -164,8 +198,8 @@ install_skill() {
         # Create target directory
         mkdir -p "$target_path"
 
-        # Copy skill files
-        if cp -r "$source_path"/* "$target_path/" 2>/dev/null; then
+        # Copy skill files ('/.' includes dotfiles, unlike a plain '*' glob)
+        if cp -r "$source_path"/. "$target_path/" 2>/dev/null; then
             log_ok "  Installed to: ${target_path}"
         else
             log_warn "  Failed to copy some files"
@@ -274,7 +308,7 @@ install_all_skills() {
     # Get list of skills from manifest or directory
     if [ -f "$MANIFEST_FILE" ]; then
         # Use manifest - single-pass jq to reduce process overhead
-        while IFS=$'\t' read -r skill_name skill_type offline_compatible; do
+        while IFS=$'\x1f' read -r skill_name skill_type offline_compatible; do
             # Skip offline-incompatible entries
             if [ "$offline_compatible" = "false" ]; then
                 log_warn "Skipping '${skill_name}' - offline_compatible=false"
@@ -295,7 +329,7 @@ install_all_skills() {
                 log_warn "Skill directory not found: ${skill_name}"
                 ((failed++)) || true
             fi
-        done < <($JQ_CMD -r '.skills | to_entries[] | [.key, .value.type // "skill", (if .value.offline_compatible == null then "true" elif .value.offline_compatible == false then "false" else "true" end)] | @tsv' "$MANIFEST_FILE")
+        done < <($JQ_CMD -r '.skills | to_entries[] | [.key, .value.type // "skill", (if .value.offline_compatible == null then "true" elif .value.offline_compatible == false then "false" else "true" end)] | join("\u001f")' "$MANIFEST_FILE")
     else
         # Use directory listing - install as skills by default
         for skill_dir in "$SKILLS_SOURCE"/*/; do
@@ -429,12 +463,11 @@ print_usage() {
         echo ""
         echo "=== Plugin Setup Notes ==="
         echo ""
-        echo "  oh-my-claudecode: Run '/setup' inside Claude Code after installation"
-        echo "  everything-claude-code: Run '/ecc:plan' to verify installation"
+        echo "  everything-claude-code (ecc): open '/plugin' inside Claude Code to verify"
         echo ""
         echo "  For detailed plugin usage, see:"
-        echo "    - https://github.com/Yeachan-Heo/oh-my-claudecode"
-        echo "    - https://github.com/affaan-m/everything-claude-code"
+        echo "    - https://github.com/affaan-m/ECC"
+        echo "    - https://github.com/obra/superpowers"
     fi
 }
 
