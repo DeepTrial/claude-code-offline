@@ -19,8 +19,10 @@ on:
     - cron: '0 1 * * 1'   # Weekly (Monday 01:00, offset to avoid double-run)
 
 env:
-  NODE_VERSION: '20'
-  NODE_VERSIONS: '18,20,22,25'
+  # claude-code 2.x package.json engines require node >= 22 for the npm wrapper
+  # path (the standalone native binary itself does NOT need Node.js).
+  NODE_VERSION: '22'
+  NODE_VERSIONS: '22,25'
   NPM_REGISTRY: 'https://registry.npmmirror.com'
 
 jobs:
@@ -261,26 +263,39 @@ jobs:
             ls -d "$GITHUB_WORKSPACE/claude-offline-packages/node_modules/@anthropic-ai/claude-code-"* 2>/dev/null || echo "  None"
           fi
 
-          # Create .bin symlinks (relative paths for portability)
-          echo "=== Creating .bin symlinks ==="
+          # Create .bin launcher as a REAL script (never a symlink) so the
+          # package survives extraction with Windows tools that drop symlinks
+          # (printf instead of heredoc: heredoc delimiters cannot be indented
+          # inside this YAML block scalar)
+          echo "=== Creating .bin launcher script ==="
           cd "$GITHUB_WORKSPACE/claude-offline-packages/node_modules/.bin"
-          # Prefer cli.js (old architecture), fall back to bin/claude.exe (new architecture)
-          if [ -f "../@anthropic-ai/claude-code/cli.js" ]; then
-            ln -sf ../@anthropic-ai/claude-code/cli.js claude
+          rm -f claude
+          if [ -f "../@anthropic-ai/claude-code/bin/claude.exe" ]; then
+            printf '%s\n' \
+              '#!/usr/bin/env bash' \
+              '# Claude Code launcher (generated at build time; real file, NOT a symlink)' \
+              'SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"' \
+              'exec "$SELF_DIR/../@anthropic-ai/claude-code/bin/claude.exe" "$@"' \
+              > claude
             chmod +x claude
-            echo "Created symlink: claude -> cli.js"
-          elif [ -f "../@anthropic-ai/claude-code/bin/claude.exe" ]; then
-            ln -sf ../@anthropic-ai/claude-code/bin/claude.exe claude
-            chmod +x claude
-            echo "Created symlink: claude -> bin/claude.exe"
+            echo "Created launcher: claude -> bin/claude.exe (real script)"
           elif [ -f "../@anthropic-ai/claude-code/cli-wrapper.cjs" ]; then
-            # Fallback: use Node.js wrapper (works but slower)
-            ln -sf ../@anthropic-ai/claude-code/cli-wrapper.cjs claude
+            printf '%s\n' \
+              '#!/usr/bin/env node' \
+              "require('../@anthropic-ai/claude-code/cli-wrapper.cjs');" \
+              > claude
             chmod +x claude
-            echo "Created symlink: claude -> cli-wrapper.cjs (fallback)"
+            echo "Created launcher: claude -> cli-wrapper.cjs (node wrapper)"
+          elif [ -f "../@anthropic-ai/claude-code/cli.js" ]; then
+            printf '%s\n' \
+              '#!/usr/bin/env node' \
+              "require('../@anthropic-ai/claude-code/cli.js');" \
+              > claude
+            chmod +x claude
+            echo "Created launcher: claude -> cli.js (node wrapper)"
           else
-            echo "WARN: No claude entry point found"
-            ls -la "../@anthropic-ai/claude-code/" 2>/dev/null | head -10
+            echo "ERROR: No claude entry point found"
+            exit 1
           fi
           if [ -f "../@musistudio/claude-code-router/dist/cli.js" ]; then
             ln -sf ../@musistudio/claude-code-router/dist/cli.js ccr
@@ -340,6 +355,30 @@ jobs:
           echo ""
           echo "=== vendor binaries check ==="
           ls -la node_modules/@anthropic-ai/claude-code/vendor/ 2>/dev/null || echo "No vendor directory (may indicate npm pack fallback was used)"
+
+      - name: Verify native binary (fail build on stub)
+        run: |
+          set -e
+          BIN="$GITHUB_WORKSPACE/claude-offline-packages/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+          if [ ! -f "$BIN" ]; then
+            echo "ERROR: bin/claude.exe is missing from the package"
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$BIN")
+          echo "bin/claude.exe size: $SIZE bytes"
+          if [ "$SIZE" -le 104857600 ]; then
+            echo "ERROR: bin/claude.exe is <= 100MB ($SIZE bytes) - this is a stub, not a real binary"
+            exit 1
+          fi
+          echo "Running: $BIN --version"
+          "$BIN" --version
+          LAUNCHER="$GITHUB_WORKSPACE/claude-offline-packages/node_modules/.bin/claude"
+          if [ -L "$LAUNCHER" ]; then
+            echo "ERROR: .bin/claude is a symlink; it must be a real launcher script"
+            exit 1
+          fi
+          [ -x "$LAUNCHER" ] || { echo "ERROR: .bin/claude is not executable"; exit 1; }
+          echo "Binary self-check passed"
 
       - name: Download VSCode extension
         run: |
@@ -422,9 +461,10 @@ jobs:
           bash skills/download-skills.sh claude-offline-packages/skills/offline-skills
           echo "Download script completed"
 
-          # Copy install script (manifest is already copied by download-skills.sh)
+          # Copy install script and shared lib (manifest is already copied by download-skills.sh)
           cp skills/install-skills.sh claude-offline-packages/skills/
           chmod +x claude-offline-packages/skills/install-skills.sh
+          cp -r skills/lib claude-offline-packages/skills/
 
           # Copy SKILLS-INDEX.md and skills-manifest.json to skills/ root level
           # (download-skills.sh puts them in offline-skills/, but they belong at skills/ level)
@@ -510,7 +550,7 @@ jobs:
             "version": "${CLAUDE_VERSION}",
             "created_at": "${BUILD_DATE}",
             "node_versions_supported": "${{ env.NODE_VERSIONS }}",
-            "node_version_min": "18",
+            "node_version_min": "22",
             "source": "https://www.npmjs.com/package/@anthropic-ai/claude-code",
             "github_repo": "${{ github.repository }}"
           }
@@ -523,9 +563,10 @@ jobs:
           cat > claude-offline-packages/node-versions.json << EOF
           {
             "min_version": 18,
-            "recommended": 20,
-            "supported": [18, 20, 22, 25],
-            "lts": [18, 20, 22]
+            "recommended": 22,
+            "supported": [22, 25],
+            "lts": [22],
+            "note": "Native binary does not require Node.js; node >= 22 is only needed for the npm wrapper fallback (engines requirement)"
           }
           EOF
 
@@ -620,7 +661,7 @@ jobs:
             echo "## Claude Code Offline Package v${CLAUDE_VERSION}"
             echo ""
             echo "**Version:** ${CLAUDE_VERSION}"
-            echo "**Node.js:** ${{ env.NODE_VERSION }}"
+            echo "**Node.js:** ${{ env.NODE_VERSION }} (native binary runs WITHOUT Node.js)"
             echo "**Build Date:** ${BUILD_DATE}"
             echo ""
 
@@ -634,26 +675,42 @@ jobs:
 
             echo "### Downloads"
             echo ""
-            echo "| File | Description |"
-            echo "|------|-------------|"
-            echo "| \`claude-offline-packages.tar.gz\` | Offline installation package |"
-            echo "| \`claude-offline-packages.tar.gz.sha256\` | SHA256 checksum |"
+            echo "| File | Platform | Description |"
+            echo "|------|----------|-------------|"
+            echo "| \`claude-offline-packages.tar.gz\` | Linux / macOS / WSL | Offline installation package |"
+            echo "| \`claude-offline-packages.tar.gz.sha256\` | - | SHA256 checksum |"
+            echo "| \`claude-offline-packages-windows.zip\` | Windows (native) | Offline installation package |"
+            echo "| \`claude-offline-packages-windows.zip.sha256\` | - | SHA256 checksum |"
             echo ""
-            echo "### Quick Start"
+            echo "### Quick Start (Linux / macOS / WSL)"
             echo ""
             echo '```bash'
             echo "# 1. Download and extract"
             echo "tar -xzf claude-offline-packages.tar.gz"
             echo ""
-            echo "# 2. Run installer"
+            echo "# 2. Run installer (unattended: add --yes)"
             echo "cd claude-offline-packages"
             echo "bash setup-claude-code.sh"
             echo '```'
+            echo ""
+            echo "### Quick Start (Windows)"
+            echo ""
+            echo "1. Download \`claude-offline-packages-windows.zip\` and extract it"
+            echo "2. Double-click \`setup-claude-code.bat\`, or run in PowerShell:"
+            echo ""
+            echo '```powershell'
+            echo 'powershell -NoProfile -ExecutionPolicy Bypass -File .\setup-claude-code.ps1 -NonInteractive'
+            echo '```'
+            echo ""
+            echo "The Windows package uses the standalone native binary (\`claude.exe\`);"
+            echo "Node.js is NOT required. The installer adds the binary directory to your"
+            echo "user PATH and creates \`%USERPROFILE%\.claude\settings.json\`."
             echo ""
             echo "### Verification"
             echo ""
             echo '```bash'
             echo "sha256sum -c claude-offline-packages.tar.gz.sha256"
+            echo "sha256sum -c claude-offline-packages-windows.zip.sha256"
             echo '```'
             echo ""
             echo "### Package Contents"
@@ -669,7 +726,7 @@ jobs:
             echo "| Component | Detail |"
             echo "|-----------|--------|"
             echo "| Claude Code | v${CLAUDE_VERSION} |"
-            echo "| Node.js Support | ${{ env.NODE_VERSIONS }} |"
+            echo "| Node.js Support | ${{ env.NODE_VERSIONS }} (optional; native binary needs no Node.js) |"
             echo "| Build Date | ${BUILD_DATE} |"
             echo "| Package Size | ${PKG_SIZE} |"
             echo "| VSCode Extension | ${HAS_VSCODE} |"
@@ -682,29 +739,15 @@ jobs:
             echo "- Offline-compatible skills and plugins"
             echo "- jq binaries for offline JSON processing"
             echo "- One-click setup script (\`setup-claude-code.sh\`)"
+            echo "- Windows setup scripts (\`setup-claude-code.ps1\` / \`.bat\`, in the Windows zip)"
             echo "- Update checker (\`check-update.sh\`)"
             if [ -f claude-offline-packages/anthropic.claude-code.vsix ]; then
               echo "- VSCode extension (\`anthropic.claude-code.vsix\`)"
             fi
-          } > /tmp/release_body.md
+          } > release_body.md
 
           echo "=== Release body generated ==="
-          cat /tmp/release_body.md
-
-      - name: Create GitHub Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ needs.check-version.outputs.latest_version }}
-          name: Claude Code v${{ needs.check-version.outputs.latest_version }}
-          body_path: /tmp/release_body.md
-          draft: false
-          prerelease: false
-          files: |
-            claude-offline-packages.tar.gz
-            claude-offline-packages.tar.gz.sha256
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          cat release_body.md
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -713,10 +756,251 @@ jobs:
           path: |
             claude-offline-packages.tar.gz
             claude-offline-packages.tar.gz.sha256
+            release_body.md
           retention-days: 30
 
+  build-windows-package:
+    needs: check-version
+    runs-on: windows-latest
+    if: needs.check-version.outputs.should_build == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Configure npm registry
+        run: |
+          npm config set registry ${{ env.NPM_REGISTRY }}
+          echo "npm registry configured: $(npm config get registry)"
+
+      - name: Download npm packages
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = "${{ needs.check-version.outputs.latest_version }}"
+          Write-Host "=== Downloading @anthropic-ai/claude-code@$ver (win32-x64 build) ==="
+          New-Item -ItemType Directory -Path work -Force | Out-Null
+          npm pack "@anthropic-ai/claude-code@$ver" --pack-destination work
+          npm pack "@anthropic-ai/claude-code-win32-x64@$ver" --pack-destination work
+          Get-ChildItem work\*.tgz | Select-Object Name, Length
+
+      - name: Assemble windows package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver = "${{ needs.check-version.outputs.latest_version }}"
+          $root = "$env:GITHUB_WORKSPACE\claude-offline-packages-windows"
+          $mainDir = "$root\node_modules\@anthropic-ai\claude-code"
+          $platDir = "$root\node_modules\@anthropic-ai\claude-code-win32-x64"
+          New-Item -ItemType Directory -Path $mainDir, $platDir -Force | Out-Null
+
+          $mainTgz = Get-ChildItem "work\anthropic-ai-claude-code-$ver.tgz" | Select-Object -First 1
+          $platTgz = Get-ChildItem "work\anthropic-ai-claude-code-win32-x64-$ver.tgz" | Select-Object -First 1
+          Write-Host "Extracting $($mainTgz.Name) -> main package"
+          tar -xzf $mainTgz.FullName -C $mainDir --strip-components=1
+          Write-Host "Extracting $($platTgz.Name) -> win32-x64 package"
+          tar -xzf $platTgz.FullName -C $platDir --strip-components=1
+
+          # Replace the placeholder stub with the real Windows PE binary
+          Copy-Item "$platDir\claude.exe" "$mainDir\bin\claude.exe" -Force
+
+          # Self-check: binary must be > 100MB (the npm stub is only ~500 bytes)
+          $size = (Get-Item "$mainDir\bin\claude.exe").Length
+          Write-Host "bin\claude.exe size: $size bytes"
+          if ($size -le 100MB) {
+            Write-Error "bin\claude.exe is a stub ($size bytes), not a real Windows binary"
+            exit 1
+          }
+          & "$mainDir\bin\claude.exe" --version
+          if ($LASTEXITCODE -ne 0) { Write-Error "claude.exe --version failed"; exit 1 }
+
+      - name: Download offline skills and plugins
+        shell: bash
+        run: |
+          set -e
+          echo "=== Downloading offline-compatible skills and plugins (windows package) ==="
+          # jq is required by download-skills.sh; install if missing
+          if ! command -v jq >/dev/null 2>&1; then
+            echo "jq not found, installing via chocolatey..."
+            choco install jq -y --no-progress
+          fi
+          mkdir -p claude-offline-packages-windows/skills/offline-skills
+          bash skills/download-skills.sh claude-offline-packages-windows/skills/offline-skills
+          cp skills/install-skills.sh claude-offline-packages-windows/skills/
+          cp -r skills/lib claude-offline-packages-windows/skills/
+          for f in SKILLS-INDEX.md skills-manifest.json; do
+            if [ -f "claude-offline-packages-windows/skills/offline-skills/$f" ]; then
+              cp "claude-offline-packages-windows/skills/offline-skills/$f" claude-offline-packages-windows/skills/
+            fi
+          done
+          du -sh claude-offline-packages-windows/skills/
+
+      - name: Download jq for windows
+        shell: bash
+        run: |
+          set -e
+          echo "=== Downloading jq (windows-amd64) for offline use ==="
+          mkdir -p /tmp/jqdl
+          bash skills/download-jq.sh --all /tmp/jqdl
+          mkdir -p claude-offline-packages-windows/skills/bin/windows-amd64
+          cp /tmp/jqdl/windows-amd64/jq.exe claude-offline-packages-windows/skills/bin/windows-amd64/
+          ls -la claude-offline-packages-windows/skills/bin/windows-amd64/
+
+      - name: Copy setup scripts and package info
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = "$env:GITHUB_WORKSPACE\claude-offline-packages-windows"
+          Copy-Item setup-claude-code.ps1, setup-claude-code.bat $root
+          $info = [ordered]@{
+            name = 'claude-offline-packages-windows'
+            version = "${{ needs.check-version.outputs.latest_version }}"
+            created_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
+            platform = 'win32-x64'
+            node_versions_supported = '${{ env.NODE_VERSIONS }}'
+            node_version_min = '22'
+            source = 'https://www.npmjs.com/package/@anthropic-ai/claude-code'
+            github_repo = '${{ github.repository }}'
+          }
+          ($info | ConvertTo-Json) | Out-File -FilePath "$root\package-info.json" -Encoding utf8
+          Get-Content "$root\package-info.json"
+
+      - name: Zip package and checksum
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Compress-Archive -Path claude-offline-packages-windows -DestinationPath claude-offline-packages-windows.zip -Force
+          $hash = (Get-FileHash claude-offline-packages-windows.zip -Algorithm SHA256).Hash.ToLower()
+          "$hash  claude-offline-packages-windows.zip" | Out-File -FilePath claude-offline-packages-windows.zip.sha256 -Encoding ascii
+          Get-Item claude-offline-packages-windows.zip | Select-Object Name, Length
+          Get-Content claude-offline-packages-windows.zip.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-offline-packages-windows-v${{ needs.check-version.outputs.latest_version }}
+          path: |
+            claude-offline-packages-windows.zip
+            claude-offline-packages-windows.zip.sha256
+          retention-days: 30
+
+  test-release-package:
+    needs: [check-version, build-offline-packages, build-windows-package]
+    runs-on: ${{ matrix.os }}
+    if: needs.check-version.outputs.should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            part: linux
+          - os: windows-latest
+            part: windows
+    steps:
+      - name: Checkout repository (test scripts)
+        uses: actions/checkout@v4
+
+      # ---------------- Linux part ----------------
+      - name: Download linux artifact
+        if: matrix.part == 'linux'
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-offline-packages-v${{ needs.check-version.outputs.latest_version }}
+          path: artifacts
+
+      - name: Extract linux package
+        if: matrix.part == 'linux'
+        run: |
+          set -e
+          tar -xzf artifacts/claude-offline-packages.tar.gz -C .
+          ls claude-offline-packages/
+
+      - name: Run linux package tests
+        if: matrix.part == 'linux'
+        run: |
+          chmod +x tests/test-linux-package.sh
+          bash tests/test-linux-package.sh "$GITHUB_WORKSPACE/claude-offline-packages" "${{ needs.check-version.outputs.latest_version }}"
+
+      # ---------------- Windows part ----------------
+      - name: Download windows artifact
+        if: matrix.part == 'windows'
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-offline-packages-windows-v${{ needs.check-version.outputs.latest_version }}
+          path: artifacts
+
+      - name: Extract windows package
+        if: matrix.part == 'windows'
+        shell: pwsh
+        run: |
+          Expand-Archive -Path artifacts\claude-offline-packages-windows.zip -DestinationPath . -Force
+          Get-ChildItem claude-offline-packages-windows
+
+      - name: Run windows package tests
+        if: matrix.part == 'windows'
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\test-windows-package.ps1 `
+            -PackageDir "$env:GITHUB_WORKSPACE\claude-offline-packages-windows" `
+            -ExpectedVersion "${{ needs.check-version.outputs.latest_version }}"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  create-release:
+    needs: [check-version, test-release-package]
+    runs-on: ubuntu-latest
+    if: needs.check-version.outputs.should_build == 'true'
+    permissions:
+      contents: write
+    steps:
+      - name: Download linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-offline-packages-v${{ needs.check-version.outputs.latest_version }}
+          path: dist
+
+      - name: Download windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: claude-offline-packages-windows-v${{ needs.check-version.outputs.latest_version }}
+          path: dist
+
+      - name: Verify release files
+        run: |
+          set -e
+          ls -lh dist/
+          for f in claude-offline-packages.tar.gz claude-offline-packages.tar.gz.sha256 \
+                   claude-offline-packages-windows.zip claude-offline-packages-windows.zip.sha256 \
+                   release_body.md; do
+            if [ ! -f "dist/$f" ]; then
+              echo "ERROR: missing release file: dist/$f"
+              exit 1
+            fi
+          done
+          echo "All release files present"
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.check-version.outputs.latest_version }}
+          name: Claude Code v${{ needs.check-version.outputs.latest_version }}
+          body_path: dist/release_body.md
+          draft: false
+          prerelease: false
+          files: |
+            dist/claude-offline-packages.tar.gz
+            dist/claude-offline-packages.tar.gz.sha256
+            dist/claude-offline-packages-windows.zip
+            dist/claude-offline-packages-windows.zip.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   cleanup-old-releases:
-    needs: [check-version, build-offline-packages]
+    needs: [check-version, create-release]
     runs-on: ubuntu-latest
     if: always() && needs.check-version.outputs.should_build == 'true'
     permissions:
