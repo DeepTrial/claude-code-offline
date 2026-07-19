@@ -17,11 +17,59 @@ CLAUDE_SKILLS_DIR="${HOME}/.claude/skills"
 CLAUDE_PLUGINS_DIR="${HOME}/.claude/plugins"
 MANIFEST_FILE="${SKILLS_SOURCE}/skills-manifest.json"
 
-# Source common utilities
-source "${SCRIPT_DIR}/lib/common.sh"
+# Source common utilities (if available); fall back to local definitions so
+# this script also works inside shipped packages that do not include lib/
+if [ -f "${SCRIPT_DIR}/lib/common.sh" ]; then
+    source "${SCRIPT_DIR}/lib/common.sh"
+fi
+
+if ! type log_info >/dev/null 2>&1; then
+    RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+    log_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+    log_ok()   { echo -e "${GREEN}[OK]${NC} $1"; }
+    log_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+    log_error(){ echo -e "${RED}[ERROR]${NC} $1" >&2; }
+fi
 
 # jq command - will be set by init_jq
 JQ_CMD=""
+
+# Minimal jq initializer when lib/common.sh (and its init_jq) is unavailable:
+# use system jq, otherwise a bundled jq next to this script (skills/bin/<platform>/jq)
+if ! type init_jq >/dev/null 2>&1; then
+    init_jq() {
+        if command -v jq &> /dev/null; then
+            JQ_CMD="jq"
+            return 0
+        fi
+        local os arch rel=""
+        os="$(uname -s)"
+        arch="$(uname -m)"
+        case "$os" in
+            Linux*)
+                case "$arch" in
+                    x86_64|amd64)   rel="linux-amd64/jq" ;;
+                    aarch64|arm64)  rel="linux-arm64/jq" ;;
+                    armv7l|armhf)   rel="linux-armhf/jq" ;;
+                esac
+                ;;
+            Darwin*)
+                case "$arch" in
+                    x86_64|amd64)   rel="macos-amd64/jq" ;;
+                    arm64)          rel="macos-arm64/jq" ;;
+                esac
+                ;;
+            CYGWIN*|MINGW*|MSYS*)
+                rel="windows-amd64/jq.exe"
+                ;;
+        esac
+        if [ -n "$rel" ] && [ -x "${SCRIPT_DIR}/bin/${rel}" ]; then
+            JQ_CMD="${SCRIPT_DIR}/bin/${rel}"
+            return 0
+        fi
+        return 1
+    }
+fi
 
 # Check if running in correct directory
 check_source() {
@@ -156,7 +204,7 @@ EOF
     local tmp_file=$(mktemp)
 
     # Add plugin entry
-    jq --arg key "$plugin_key" \
+    $JQ_CMD --arg key "$plugin_key" \
        --arg marketplace "$marketplace_name" \
        --arg plugin "$plugin_name" \
        --arg version "$version" \
@@ -195,7 +243,7 @@ EOF
     local tmp_file=$(mktemp)
 
     # Add marketplace entry
-    jq --arg name "$marketplace_name" \
+    $JQ_CMD --arg name "$marketplace_name" \
        --arg path "$marketplace_dir" \
        --arg time "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
        '.[$name] = {

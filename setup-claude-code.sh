@@ -8,7 +8,7 @@
 # Usage:   bash setup-claude-code.sh [--offline-path PATH] [--auto-download]
 #
 # Author:  DeepTrial (Enhanced)
-# Version: 2.1 - With Mirror Source Detection
+# Version: 2.3 - Native binary support, offline resilience, non-interactive mode
 # =============================================================================
 
 set -euo pipefail
@@ -69,7 +69,7 @@ USER_TMPDIR="$HOME/.claude/tmp"
 BASHRC="$HOME/.bashrc"
 
 # GitHub Release Configuration
-GITHUB_REPO="anthropics/claude-code"
+GITHUB_REPO="DeepTrial/claude-code-offline"
 GITHUB_API_URL="https://api.github.com/repos/${GITHUB_REPO}/releases/latest"
 
 # Default offline package path (relative to script location)
@@ -84,6 +84,13 @@ NODE_END="# <<< CLAUDE_CODE_NODE <<<"
 # Network timeout settings (seconds)
 NETWORK_TIMEOUT=10
 CURL_RETRY=2
+
+# Non-interactive mode flags (set by argument parsing)
+ASSUME_YES=false
+NON_INTERACTIVE=false
+
+# Network status: unknown / true / false (set by check_network_status)
+NETWORK_AVAILABLE="unknown"
 
 # ---------------------------------------------------------------------------
 # Mirror Source Configuration
@@ -231,10 +238,7 @@ uninstall_claude_code() {
         echo ""
     fi
     
-    read -p "Are you sure you want to uninstall Claude Code? [y/N]: " -n 1 -r
-    echo
-    
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if ! confirm_uninstall; then
         log_info "Uninstall cancelled."
         return 0
     fi
@@ -244,10 +248,7 @@ uninstall_claude_code() {
     
     # 1. Backup configuration (ask user)
     if [ -d "$HOME/.claude" ] || [ -f "$HOME/.claude.json" ]; then
-        read -p "Do you want to backup configuration files before uninstalling? [Y/n]: " -n 1 -r
-        echo
-        
-        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        if confirm "Do you want to backup configuration files before uninstalling?" y; then
             local backup_dir="$HOME/.claude-backup-$(date +%Y%m%d_%H%M%S)"
             mkdir -p "$backup_dir"
             
@@ -337,9 +338,7 @@ uninstall_claude_code() {
         
         # Remove NVM configuration (if added by this script)
         if grep -q "NVM CONFIGURATION" "$BASHRC" 2>/dev/null; then
-            read -p "Remove NVM configuration from .bashrc? (Select 'n' if you use nvm for other projects) [y/N]: " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
+            if confirm "Remove NVM configuration from .bashrc? (Select 'n' if you use nvm for other projects)" n; then
                 sed -i '/# >>> NVM CONFIGURATION >>>/,/# <<< NVM CONFIGURATION <<</d' "$BASHRC"
                 log_ok "Removed NVM configuration"
             fi
@@ -347,9 +346,7 @@ uninstall_claude_code() {
         
         # Remove Node.js PATH (if installed to ~/.local/node)
         if grep -q "/.local/node/bin" "$BASHRC" 2>/dev/null; then
-            read -p "Remove Node.js PATH from .bashrc? (Select 'n' if you use this Node.js for other projects) [y/N]: " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
+            if confirm "Remove Node.js PATH from .bashrc? (Select 'n' if you use this Node.js for other projects)" n; then
                 sed -i '/\/\.local\/node\/bin/d' "$BASHRC"
                 log_ok "Removed Node.js PATH"
             fi
@@ -372,9 +369,7 @@ uninstall_claude_code() {
     
     # 6. Ask if user wants to remove offline packages
     if [ -d "$USER_CLAUDE_DIR/offline-packages" ]; then
-        read -p "Remove downloaded offline packages? [y/N]: " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if confirm "Remove downloaded offline packages?" n; then
             rm -rf "$USER_CLAUDE_DIR/offline-packages"
             log_ok "Removed offline packages"
         fi
@@ -384,9 +379,7 @@ uninstall_claude_code() {
     if [ -d "$HOME/.local/node" ]; then
         echo ""
         log_warn "Detected Node.js installation at: $HOME/.local/node"
-        read -p "Remove this Node.js installation? (Select 'n' if you use it for other projects) [y/N]: " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if confirm "Remove this Node.js installation? (Select 'n' if you use it for other projects)" n; then
             rm -rf "$HOME/.local/node"
             log_ok "Removed Node.js from $HOME/.local/node"
         fi
@@ -396,9 +389,7 @@ uninstall_claude_code() {
     if [ -d "$HOME/.nvm" ]; then
         echo ""
         log_warn "Detected nvm installation at: $HOME/.nvm"
-        read -p "Remove nvm? (Select 'n' if you use it for other projects) [y/N]: " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
+        if confirm "Remove nvm? (Select 'n' if you use it for other projects)" n; then
             rm -rf "$HOME/.nvm"
             log_ok "Removed nvm from $HOME/.nvm"
         fi
@@ -422,9 +413,7 @@ uninstall_claude_code() {
     if [ -f /proc/version ] && grep -q "Microsoft" /proc/version 2>/dev/null; then
         if echo "$PATH" | grep -q "/mnt/c.*npm"; then
             echo ""
-            read -p "Detected Windows npm in WSL PATH. Add automatic fix to .bashrc? [Y/n]: " -n 1 -r
-            echo
-            if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            if confirm "Detected Windows npm in WSL PATH. Add automatic fix to .bashrc?" y; then
                 log_info "Adding PATH fix to .bashrc..."
                 cat >> "$BASHRC" << 'WSLFIX'
 
@@ -474,6 +463,378 @@ WSLFIX
 
 # Common utilities (log_*, command_exists, test_url_accessible, download_with_mirrors)
 # are sourced from skills/lib/common.sh above.
+
+# ---------------------------------------------------------------------------
+# Interactivity helpers (--yes / --non-interactive support)
+# ---------------------------------------------------------------------------
+
+# Unified confirmation helper.
+# Usage: confirm "Prompt text" [y|n]     (second arg = default answer, default n)
+# Returns 0 for yes, 1 for no.
+# When ASSUME_YES/NON_INTERACTIVE is set or stdin is not a TTY, the default
+# answer is chosen automatically and the choice is printed.
+confirm() {
+    local prompt="$1"
+    local default="${2:-n}"
+    local yn_hint answer
+
+    if [ "$default" = y ]; then yn_hint="[Y/n]"; else yn_hint="[y/N]"; fi
+
+    if [ "$ASSUME_YES" = true ] || [ "$NON_INTERACTIVE" = true ] || [ ! -t 0 ]; then
+        echo "$prompt $yn_hint: $default (auto)"
+        [ "$default" = y ] && return 0 || return 1
+    fi
+
+    read -p "$prompt $yn_hint: " -n 1 -r answer || answer=""
+    echo
+    [ -z "$answer" ] && answer="$default"
+    [[ "$answer" =~ ^[Yy]$ ]]
+}
+
+# Uninstall confirmation: always requires an explicit yes interactively,
+# but --yes (ASSUME_YES) auto-confirms.
+confirm_uninstall() {
+    if [ "$ASSUME_YES" = true ]; then
+        echo "Are you sure you want to uninstall Claude Code? [y/N]: y (auto, --yes)"
+        return 0
+    fi
+    confirm "Are you sure you want to uninstall Claude Code?" n
+}
+
+# ---------------------------------------------------------------------------
+# Network resilience helpers
+# ---------------------------------------------------------------------------
+
+# Probe npm registry and GitHub with a 5 second timeout each.
+# Sets NETWORK_AVAILABLE=true/false and prints a clear conclusion.
+check_network_status() {
+    local npm_ok=false gh_ok=false
+    local npm_probe="${NPM_MIRRORS[0]}"
+    local gh_probe="${GITHUB_MIRRORS[0]}"
+
+    log_info "Checking network connectivity (5s timeout per probe)..."
+
+    if test_url_accessible "$npm_probe" 5; then
+        npm_ok=true
+        log_ok "npm registry reachable: $npm_probe"
+    else
+        log_warn "npm registry UNREACHABLE: $npm_probe"
+    fi
+
+    if test_url_accessible "$gh_probe" 5; then
+        gh_ok=true
+        log_ok "GitHub reachable: $gh_probe"
+    else
+        log_warn "GitHub UNREACHABLE: $gh_probe"
+    fi
+
+    if [ "$npm_ok" = true ] || [ "$gh_ok" = true ]; then
+        NETWORK_AVAILABLE=true
+        log_ok "Network available"
+    else
+        NETWORK_AVAILABLE=false
+        log_warn "Network appears UNAVAILABLE (npm registry and GitHub both unreachable)"
+    fi
+    return 0
+}
+
+# Fail-fast guard for steps that require network access.
+# Usage: require_network_or_fail "download offline packages"
+require_network_or_fail() {
+    local what="$1"
+    if [ "$NETWORK_AVAILABLE" = "unknown" ]; then
+        check_network_status
+    fi
+    if [ "$NETWORK_AVAILABLE" != true ]; then
+        log_error "Cannot $what: network is unreachable."
+        echo ""
+        echo "Troubleshooting suggestions:"
+        echo "  - Check your internet connection / proxy / firewall settings"
+        echo "  - Behind a proxy? export HTTPS_PROXY=http://proxy-host:port"
+        echo "  - Use a mirror, e.g.: NPM_MIRROR=https://registry.npmmirror.com bash $0 --auto-download"
+        echo "  - Fully offline? use a pre-downloaded package: bash $0 --offline-path /path/to/claude-offline-packages"
+        return 1
+    fi
+    return 0
+}
+
+# Run npm with a timeout and clear diagnostics.
+# Usage: run_npm_with_timeout <seconds> <npm args...>
+run_npm_with_timeout() {
+    local seconds="$1"; shift
+    echo "Running: npm $* (timeout ${seconds}s)"
+    if timeout "$seconds" npm "$@"; then
+        return 0
+    fi
+    local rc=$?
+    if [ $rc -eq 124 ]; then
+        log_error "'npm $*' timed out after ${seconds}s"
+    else
+        log_error "'npm $*' failed (exit code $rc)"
+    fi
+    echo ""
+    echo "Possible causes:"
+    echo "  - npm registry unreachable (check network / proxy / firewall)"
+    echo "  - the configured registry is down or blocked"
+    echo "Try specifying a mirror, e.g.:"
+    echo "  NPM_MIRROR=https://registry.npmmirror.com bash $0"
+    return $rc
+}
+
+# ---------------------------------------------------------------------------
+# Native binary / launcher helpers (claude-code 2.x standalone binaries)
+# ---------------------------------------------------------------------------
+
+# Print the platform package binary path for this machine, if present.
+# Usage: platform_native_binary <packages_dir>
+platform_native_binary() {
+    local pkg_dir="$1"
+    local os arch suffix=""
+    os="$(uname -s)"
+    arch="$(uname -m)"
+    case "$os" in
+        Linux*)
+            case "$arch" in
+                x86_64|amd64)   suffix="linux-x64" ;;
+                aarch64|arm64)  suffix="linux-arm64" ;;
+            esac
+            ;;
+        Darwin*)
+            case "$arch" in
+                x86_64|amd64)   suffix="darwin-x64" ;;
+                arm64)          suffix="darwin-arm64" ;;
+            esac
+            ;;
+        CYGWIN*|MINGW*|MSYS*)
+            case "$arch" in
+                x86_64|amd64)   suffix="win32-x64" ;;
+                arm64|aarch64)  suffix="win32-arm64" ;;
+            esac
+            ;;
+    esac
+    [ -z "$suffix" ] && return 1
+    local candidate="$pkg_dir/node_modules/@anthropic-ai/claude-code-${suffix}/claude"
+    case "$suffix" in
+        win32-*) candidate="${candidate}.exe" ;;
+    esac
+    if [ -f "$candidate" ]; then
+        echo "$candidate"
+        return 0
+    fi
+    return 1
+}
+
+# File size that works on both GNU (Linux) and BSD (macOS) stat
+file_size() {
+    stat -c%s "$1" 2>/dev/null || stat -f%z "$1" 2>/dev/null || echo 0
+}
+
+# Test whether a native binary actually runs (--version within 30s)
+native_binary_runs() {
+    local bin="$1"
+    [ -f "$bin" ] || return 1
+    chmod +x "$bin" 2>/dev/null || true
+    timeout 30 "$bin" --version >/dev/null 2>&1
+}
+
+# Detect how this package can run:
+#   "native"   -> bin/claude.exe is a real, runnable native binary (no Node.js needed)
+#   "platform" -> bin/claude.exe is a stub but the platform package binary runs
+#   "node"     -> no usable native binary; Node.js wrapper fallback required
+detect_runtime_mode() {
+    local pkg_dir="$1"
+    local main_bin="$pkg_dir/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+    local size plat_bin
+    size=$(file_size "$main_bin")
+    if [ "$size" -gt 100000 ] && native_binary_runs "$main_bin"; then
+        echo "native"
+        return 0
+    fi
+    plat_bin=$(platform_native_binary "$pkg_dir" || true)
+    if [ -n "$plat_bin" ] && native_binary_runs "$plat_bin"; then
+        echo "platform"
+        return 0
+    fi
+    echo "node"
+}
+
+# Always (re)build node_modules/.bin/claude as a REAL launcher script
+# (plain text file, never a symlink). This repairs packages whose symlinks
+# were lost when the tar.gz was extracted with Windows tools (Explorer/7z).
+# Returns: 0 = launcher execs native binary, 2 = Node.js wrapper fallback,
+#          1 = fatal (no entry point found)
+rebuild_claude_launcher() {
+    local pkg_dir="$1"
+    local bin_dir="$pkg_dir/node_modules/.bin"
+    local launcher="$bin_dir/claude"
+    local main_bin="$pkg_dir/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
+    local size target_rel=""
+    size=$(file_size "$main_bin")
+
+    mkdir -p "$bin_dir"
+
+    if [ "$size" -gt 100000 ]; then
+        target_rel="../@anthropic-ai/claude-code/bin/claude.exe"
+    else
+        # bin/claude.exe is missing or a stub (<100KB): exec the platform
+        # package binary instead (chosen by uname -s/-m)
+        local plat_bin plat_name
+        plat_bin=$(platform_native_binary "$pkg_dir" || true)
+        if [ -n "$plat_bin" ]; then
+            plat_name=$(basename "$(dirname "$plat_bin")")
+            target_rel="../@anthropic-ai/${plat_name}/$(basename "$plat_bin")"
+            log_warn "bin/claude.exe is a stub (${size} bytes); launcher will use ${plat_name} binary"
+        fi
+    fi
+
+    rm -f "$launcher" 2>/dev/null || true
+
+    if [ -n "$target_rel" ]; then
+        cat > "$launcher" <<LAUNCHER
+#!/usr/bin/env bash
+# Claude Code launcher (generated by setup-claude-code.sh)
+# Real file (NOT a symlink) so it survives Windows extraction tools.
+# Locates its own directory via BASH_SOURCE, then execs the native binary.
+SELF_DIR="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+exec "\$SELF_DIR/${target_rel}" "\$@"
+LAUNCHER
+        chmod +x "$launcher"
+        log_ok "Rebuilt launcher as real file (execs native binary): $launcher"
+        return 0
+    fi
+
+    # Fallback: Node.js wrapper (requires Node.js at runtime)
+    if [ -f "$pkg_dir/node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs" ]; then
+        cat > "$launcher" << 'WRAPPER'
+#!/usr/bin/env node
+require('../@anthropic-ai/claude-code/cli-wrapper.cjs');
+WRAPPER
+        chmod +x "$launcher"
+        log_warn "No usable native binary; launcher uses cli-wrapper.cjs (Node.js required at runtime)"
+        return 2
+    elif [ -f "$pkg_dir/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+        cat > "$launcher" << 'LAUNCHER'
+#!/usr/bin/env node
+require('../@anthropic-ai/claude-code/cli.js');
+LAUNCHER
+        chmod +x "$launcher"
+        log_warn "No usable native binary; launcher uses cli.js (Node.js required at runtime)"
+        return 2
+    fi
+
+    log_error "Could not create claude launcher: no native binary or Node.js wrapper found in package"
+    return 1
+}
+
+# ---------------------------------------------------------------------------
+# jq helper for the skills installer (system -> bundled -> package manager)
+# ---------------------------------------------------------------------------
+ensure_jq_for_skills() {
+    local pkg_dir="$1"
+
+    if command -v jq &>/dev/null; then
+        return 0
+    fi
+
+    log_warn "jq is required for skills installation"
+    log_info "Attempting to use bundled jq from offline package..."
+
+    # Try bundled jq first (no sudo required)
+    local bundled_jq=""
+    local os_jq arch_jq
+    os_jq="$(uname -s)"
+    arch_jq="$(uname -m)"
+
+    case "$os_jq" in
+        Linux*)
+            case "$arch_jq" in
+                x86_64|amd64)   bundled_jq="linux-amd64/jq" ;;
+                aarch64|arm64)  bundled_jq="linux-arm64/jq" ;;
+            esac
+            ;;
+        Darwin*)
+            case "$arch_jq" in
+                x86_64|amd64)   bundled_jq="macos-amd64/jq" ;;
+                arm64)          bundled_jq="macos-arm64/jq" ;;
+            esac
+            ;;
+        CYGWIN*|MINGW*|MSYS*)
+            bundled_jq="windows-amd64/jq.exe"
+            ;;
+    esac
+
+    # Search both known layouts: tools/jq/<platform> (legacy) and
+    # skills/bin/<platform> (current packages)
+    local candidate=""
+    if [ -n "$bundled_jq" ]; then
+        local base
+        for base in "${pkg_dir}/tools/jq" "${pkg_dir}/skills/bin"; do
+            if [ -x "${base}/${bundled_jq}" ]; then
+                candidate="${base}/${bundled_jq}"
+                break
+            fi
+        done
+    fi
+
+    if [ -n "$candidate" ]; then
+        # Create a temporary jq in PATH so `command -v jq` succeeds
+        local tmp_jq_dir
+        tmp_jq_dir=$(mktemp -d)
+        ln -sf "$candidate" "$tmp_jq_dir/jq"
+        export PATH="$tmp_jq_dir:$PATH"
+        log_ok "Using bundled jq from offline package (no sudo required): $candidate"
+        return 0
+    fi
+
+    # Fallback: try to install system jq (requires sudo and network)
+    log_info "No bundled jq found for ${os_jq}/${arch_jq}, attempting system install..."
+    if ! require_network_or_fail "install jq"; then
+        return 1
+    fi
+    if command -v apt-get &>/dev/null; then
+        sudo apt-get update && sudo apt-get install -y jq
+    elif command -v yum &>/dev/null; then
+        sudo yum install -y jq
+    elif command -v brew &>/dev/null; then
+        brew install jq
+    else
+        log_error "Could not install jq automatically"
+        return 1
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Direct npm installation of Claude Code (requires network)
+# ---------------------------------------------------------------------------
+install_via_npm_direct() {
+    local target_dir="$1"
+    mkdir -p "$target_dir"
+    cd "$target_dir"
+
+    if ! require_network_or_fail "install Claude Code via npm"; then
+        return 1
+    fi
+
+    # Select the fastest npm mirror (or the default when skipping tests)
+    local npm_mirror
+    if [ "$SKIP_MIRROR_TEST" = true ]; then
+        npm_mirror="${NPM_MIRRORS[0]}"
+    else
+        npm_mirror=$(select_fastest_npm_mirror)
+    fi
+    npm config set registry "$npm_mirror"
+
+    log_info "Installing Claude Code via npm..."
+    if ! run_npm_with_timeout 180 install @anthropic-ai/claude-code --production; then
+        return 1
+    fi
+    mkdir -p node_modules/.bin
+    if [ -f "node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+        ln -sf ../@anthropic-ai/claude-code/cli.js node_modules/.bin/claude
+        chmod +x node_modules/.bin/claude
+    fi
+    log_ok "Claude Code installed"
+}
 
 # ---------------------------------------------------------------------------
 # Config File Generators (used by both --config-only and normal mode)
@@ -707,6 +1068,8 @@ CLEANTMP
 }
 
 # Generic mirror speed test
+# NOTE: log output goes to stderr so `mirror=$(select_fastest_*)` captures
+# only the mirror URL on stdout.
 select_fastest_mirror() {
     local name="$1"
     shift
@@ -714,7 +1077,14 @@ select_fastest_mirror() {
     local best_mirror="${mirrors[0]}"
     local min_time=9999
 
-    log_info "Testing ${name} mirrors for best speed..."
+    # Honor --skip-mirror-test: use the first (default) mirror without probing
+    if [ "${SKIP_MIRROR_TEST:-false}" = true ]; then
+        log_info "Skipping ${name} mirror test, using default: $best_mirror" >&2
+        echo "$best_mirror"
+        return 0
+    fi
+
+    log_info "Testing ${name} mirrors for best speed..." >&2
 
     for mirror in "${mirrors[@]}"; do
         local start_time end_time elapsed
@@ -724,18 +1094,18 @@ select_fastest_mirror() {
             end_time=$(date +%s%N 2>/dev/null || echo "$(date +%s)000000000")
             elapsed=$(( (end_time - start_time) / 1000000 ))
 
-            log_info "  $mirror: ${elapsed}ms"
+            log_info "  $mirror: ${elapsed}ms" >&2
 
             if [ "$elapsed" -lt "$min_time" ]; then
                 min_time=$elapsed
                 best_mirror="$mirror"
             fi
         else
-            log_warn "  $mirror: UNREACHABLE"
+            log_warn "  $mirror: UNREACHABLE" >&2
         fi
     done
 
-    log_ok "Selected ${name} mirror: $best_mirror"
+    log_ok "Selected ${name} mirror: $best_mirror" >&2
     echo "$best_mirror"
 }
 
@@ -788,15 +1158,16 @@ get_recommended_node_version() {
         return
     fi
     
-    # Default to 20 (LTS with good compatibility)
-    echo "20"
+    # Default to 22 (LTS; claude-code 2.x package.json engines require node >= 22
+    # for the npm wrapper path; the native binary itself does not need Node.js)
+    echo "22"
 }
 
 # Download and install Node.js binary
 # Supports versions 18, 20, 22, 25 and future versions
 download_and_install_nodejs() {
     local install_dir="$1"
-    local version="${2:-20.18.0}"  # Updated to latest LTS
+    local version="${2:-22.11.0}"  # Default to Node.js 22 LTS
     local arch="linux-x64"
     
     log_info "Downloading Node.js v${version}..."
@@ -843,7 +1214,7 @@ download_and_install_nodejs() {
 # Get the latest LTS or specific Node version
 download_latest_node() {
     local install_dir="$1"
-    local preferred_version="${2:-20}"
+    local preferred_version="${2:-22}"
     
     log_info "Attempting to install Node.js v${preferred_version}..."
     
@@ -862,9 +1233,9 @@ download_latest_node() {
         return 0
     fi
     
-    # Fall back to latest LTS
-    log_warn "Failed to download Node.js v${version_map}, trying LTS..."
-    if download_and_install_nodejs "$install_dir" "20.18.0"; then
+    # Fall back to Node.js 22 LTS
+    log_warn "Failed to download Node.js v${version_map}, trying v22 LTS..."
+    if download_and_install_nodejs "$install_dir" "22.11.0"; then
         return 0
     fi
     
@@ -892,16 +1263,16 @@ install_nodejs() {
         # Try to install preferred version, fallback to lts if not available
         if ! nvm install "$target_version" 2>/dev/null; then
             log_warn "Node.js $target_version not available via nvm, trying LTS..."
-            if ! nvm install 20 2>/dev/null; then
-                log_warn "Node.js 20 not available, trying any LTS..."
+            if ! nvm install 22 2>/dev/null; then
+                log_warn "Node.js 22 not available, trying any LTS..."
                 nvm install --lts || {
                     log_error "Failed to install Node.js via nvm"
                     return 1
                 }
             fi
         fi
-        nvm use "$target_version" 2>/dev/null || nvm use 20 2>/dev/null || nvm use --lts
-        nvm alias default "$target_version" 2>/dev/null || nvm alias default 20 2>/dev/null || nvm alias default --lts
+        nvm use "$target_version" 2>/dev/null || nvm use 22 2>/dev/null || nvm use --lts
+        nvm alias default "$target_version" 2>/dev/null || nvm alias default 22 2>/dev/null || nvm alias default --lts
         log_ok "Node.js installed via nvm"
         return 0
     fi
@@ -938,17 +1309,17 @@ NVMBLOCK
         
         # Try to install preferred version, fallback to 20 then lts
         if ! nvm install "$target_version" 2>/dev/null; then
-            log_warn "Node.js $target_version not available, trying 20..."
-            if ! nvm install 20 2>/dev/null; then
-                log_warn "Node.js 20 not available, trying LTS..."
+            log_warn "Node.js $target_version not available, trying 22..."
+            if ! nvm install 22 2>/dev/null; then
+                log_warn "Node.js 22 not available, trying LTS..."
                 nvm install --lts || {
                     log_error "Failed to install Node.js via nvm"
                     return 1
                 }
             fi
         fi
-        nvm use "$target_version" 2>/dev/null || nvm use 20 2>/dev/null || nvm use --lts
-        nvm alias default "$target_version" 2>/dev/null || nvm alias default 20 2>/dev/null || nvm alias default --lts
+        nvm use "$target_version" 2>/dev/null || nvm use 22 2>/dev/null || nvm use --lts
+        nvm alias default "$target_version" 2>/dev/null || nvm alias default 22 2>/dev/null || nvm alias default --lts
         
         log_ok "Node.js installed via nvm"
         return 0
@@ -977,10 +1348,10 @@ ensure_nodejs() {
     
     log_warn "Node.js >= 18 is required but not found"
     
-    read -p "Do you want to install Node.js automatically? [Y/n]: " -n 1 -r
-    echo
-    
-    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+    if confirm "Do you want to install Node.js automatically?" y; then
+        if ! require_network_or_fail "install Node.js"; then
+            return 1
+        fi
         if install_nodejs; then
             # 重新检查
             if check_nodejs_requirement; then
@@ -1009,9 +1380,18 @@ download_offline_packages() {
     local download_dir="$1"
     mkdir -p "$download_dir"
     
+    # Fail fast (with clear guidance) when the network is unreachable
+    if ! require_network_or_fail "download offline packages"; then
+        return 1
+    fi
+    
     # Get fastest GitHub mirror
     local github_mirror
-    github_mirror=$(select_fastest_github_mirror)
+    if [ "$SKIP_MIRROR_TEST" = true ]; then
+        github_mirror="${GITHUB_MIRRORS[0]}"
+    else
+        github_mirror=$(select_fastest_github_mirror)
+    fi
     
     log_info "Using GitHub mirror: $github_mirror"
     
@@ -1036,12 +1416,18 @@ download_offline_packages() {
         
         # Set fastest npm mirror
         local npm_mirror
-        npm_mirror=$(select_fastest_npm_mirror)
+        if [ "$SKIP_MIRROR_TEST" = true ]; then
+            npm_mirror="${NPM_MIRRORS[0]}"
+        else
+            npm_mirror=$(select_fastest_npm_mirror)
+        fi
         npm config set registry "$npm_mirror"
         
         mkdir -p "$download_dir"
         cd "$download_dir"
-        npm install @anthropic-ai/claude-code --production
+        if ! run_npm_with_timeout 180 install @anthropic-ai/claude-code --production; then
+            return 1
+        fi
         
         # 创建 .bin 链接
         mkdir -p node_modules/.bin
@@ -1102,8 +1488,11 @@ find_offline_packages() {
     )
     
     for path in "${paths[@]}"; do
-        # Check new format: pre-extracted node_modules with @anthropic-ai/claude-code
-        if [ -r "$path/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+        # New format: pre-extracted node_modules with @anthropic-ai/claude-code
+        # (cli.js legacy, native binary, or Node.js wrapper entry points)
+        if [ -r "$path/node_modules/@anthropic-ai/claude-code/cli.js" ] \
+            || [ -r "$path/node_modules/@anthropic-ai/claude-code/bin/claude.exe" ] \
+            || [ -r "$path/node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs" ]; then
             echo "$path"
             return 0
         fi
@@ -1112,7 +1501,7 @@ find_offline_packages() {
             echo "$path"
             return 0
         fi
-        # Check old format: pre-installed node_modules with .bin/claude
+        # Old format: pre-installed node_modules with .bin/claude
         if [ -r "$path/node_modules/.bin/claude" ]; then
             echo "$path"
             return 0
@@ -1138,9 +1527,9 @@ install_from_tgz_packages() {
     
     # Install dependencies
     if [ -f "package.json" ]; then
-        npm ci --production 2>/dev/null || npm install --production 2>/dev/null || {
+        run_npm_with_timeout 180 ci --production 2>/dev/null || run_npm_with_timeout 180 install --production 2>/dev/null || {
             log_warn "npm install failed, trying npm ci..."
-            npm ci --production
+            run_npm_with_timeout 180 ci --production
         }
     fi
     
@@ -1151,7 +1540,7 @@ install_from_tgz_packages() {
 # Banner & Safety Checks
 # ---------------------------------------------------------------------------
 echo "============================================================================="
-echo "  Claude Code Deployment Script v2.2 - With Node 18-25+ Support"
+echo "  Claude Code Deployment Script v2.3 - Native Binary / Offline Resilient"
 echo "============================================================================="
 echo ""
 
@@ -1197,6 +1586,14 @@ while [[ $# -gt 0 ]]; do
             SKILLS_ONLY=true
             shift
             ;;
+        --yes|-y)
+            ASSUME_YES=true
+            shift
+            ;;
+        --non-interactive)
+            NON_INTERACTIVE=true
+            shift
+            ;;
         --uninstall)
             uninstall_claude_code
             exit 0
@@ -1211,7 +1608,16 @@ while [[ $# -gt 0 ]]; do
             echo "  --skip-mirror-test     Skip mirror speed test (use default sources)"
             echo "  --config-only          Only generate configuration files (skip Claude installation)"
             echo "  --skills-only          Only install offline skills"
+            echo "  --yes, -y              Assume 'yes' for all prompts (fully unattended install)"
+            echo "  --non-interactive      Never prompt; use default answers (safe for scripts/CI)"
+            echo "  --uninstall            Uninstall Claude Code and related configuration"
             echo "  --help, -h             Show this help message"
+            echo ""
+            echo "Node.js note:"
+            echo "  claude-code 2.x ships a standalone native binary that does NOT need"
+            echo "  Node.js. When a runnable native binary is detected, Node.js setup is"
+            echo "  optional (skipped by default). Node.js >= 18 (22 recommended) is only"
+            echo "  required when the package must fall back to the Node.js wrapper."
             echo ""
             echo "Environment Variables:"
             echo "  NODE_MIRROR            Custom Node.js mirror URL"
@@ -1222,6 +1628,7 @@ while [[ $# -gt 0 ]]; do
             echo "  $0                                    # Auto-detect or interactive mode"
             echo "  $0 --offline-path /path/to/packages   # Use specific offline packages"
             echo "  $0 --auto-download                    # Auto-download with mirror detection"
+            echo "  $0 --offline-path ./pkg --yes         # Unattended offline install"
             echo "  $0 --config-only                      # Only generate config files"
             echo "  $0 --skills-only                      # Only install offline skills"
             echo "  NODE_MIRROR=https://... $0            # Use custom mirror"
@@ -1388,7 +1795,12 @@ if [ "$CONFIG_ONLY" = false ] && [ "$SKILLS_ONLY" = false ]; then
         echo "  3) Continue anyway (may cause conflicts)"
         echo "  4) Exit"
         echo ""
-        read -p "Select option [1-4]: " -r choice
+        if [ "$ASSUME_YES" = true ] || [ "$NON_INTERACTIVE" = true ] || [ ! -t 0 ]; then
+            choice="1"
+            echo "Select option [1-4]: 1 (auto, non-interactive)"
+        else
+            read -p "Select option [1-4]: " -r choice
+        fi
 
         case $choice in
             1)
@@ -1438,8 +1850,12 @@ is_valid_package_path() {
     if [ -f "$path/package.json" ] && ls "$path"/*.tgz >/dev/null 2>&1; then
         return 0
     fi
-    # Old format: pre-installed node_modules
-    if [ -r "$path/node_modules/.bin/claude" ] || [ -r "$path/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
+    # Pre-installed node_modules: any known claude entry point
+    # (.bin launcher, native binary, Node.js wrappers, or legacy cli.js)
+    if [ -r "$path/node_modules/.bin/claude" ] \
+        || [ -r "$path/node_modules/@anthropic-ai/claude-code/bin/claude.exe" ] \
+        || [ -r "$path/node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs" ] \
+        || [ -r "$path/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
         return 0
     fi
     return 1
@@ -1468,10 +1884,21 @@ elif [ "$AUTO_DOWNLOAD" = true ] || [ "$FORCE_DOWNLOAD" = true ]; then
     fi
 else
     # Auto-detect
-    OFFLINE_PACKAGES=$(find_offline_packages)
+    OFFLINE_PACKAGES=$(find_offline_packages || true)
     
     if [ -z "$OFFLINE_PACKAGES" ]; then
         log_warn "Offline packages not found in default locations"
+
+        # Non-interactive mode: cannot ask the user; fail with clear guidance
+        if [ "$ASSUME_YES" = true ] || [ "$NON_INTERACTIVE" = true ] || [ ! -t 0 ]; then
+            log_error "No offline packages found and interactive selection is disabled."
+            echo ""
+            echo "Run one of:"
+            echo "  bash $0 --offline-path /path/to/claude-offline-packages --yes"
+            echo "  bash $0 --auto-download --yes"
+            exit 1
+        fi
+
         echo ""
         echo "Options:"
         echo "  1) Download from GitHub Release automatically (with mirror detection)"
@@ -1497,20 +1924,9 @@ else
                 ;;
             3)
                 OFFLINE_PACKAGES="$USER_CLAUDE_DIR/offline-packages"
-                mkdir -p "$OFFLINE_PACKAGES"
-                cd "$OFFLINE_PACKAGES"
-                
-                # 设置最快的 npm 镜像
-                local npm_mirror
-                npm_mirror=$(select_fastest_npm_mirror)
-                npm config set registry "$npm_mirror"
-                
-                log_info "Installing Claude Code via npm..."
-                npm install @anthropic-ai/claude-code --production
-                mkdir -p node_modules/.bin
-                ln -sf ../@anthropic-ai/claude-code/cli.js node_modules/.bin/claude
-                chmod +x node_modules/.bin/claude
-                log_ok "Claude Code installed"
+                if ! install_via_npm_direct "$OFFLINE_PACKAGES"; then
+                    exit 1
+                fi
                 ;;
             4|*)
                 log_info "Please download the packages and re-run this script with --offline-path"
@@ -1532,119 +1948,110 @@ if [ -f "$OFFLINE_PACKAGES/package.json" ] && ls "$OFFLINE_PACKAGES"/*.tgz >/dev
     
     # Check if already installed
     if [ ! -d "$OFFLINE_PACKAGES/node_modules/@anthropic-ai" ]; then
+        if ! command_exists npm; then
+            log_error "This package must be assembled with npm, but Node.js/npm is not installed."
+            log_info "Use a pre-assembled package (containing node_modules/) or install Node.js >= 18 first."
+            exit 1
+        fi
+        if ! require_network_or_fail "assemble packages with npm"; then
+            exit 1
+        fi
         log_info "Installing packages from .tgz files..."
         cd "$OFFLINE_PACKAGES"
-        npm install --production 2>/dev/null || npm ci --production 2>/dev/null || {
+        run_npm_with_timeout 240 install --production 2>/dev/null || run_npm_with_timeout 240 ci --production 2>/dev/null || {
             log_warn "Standard npm install failed, trying alternative..."
             # Extract and install manually
             for tgz in "$OFFLINE_PACKAGES"/*.tgz; do
                 [ -f "$tgz" ] || continue
-                npm install "$tgz" --production 2>/dev/null || true
+                run_npm_with_timeout 120 install "$tgz" --production 2>/dev/null || true
             done
         }
     fi
 fi
 
-# Fix permissions for the package files
+# Fix permissions for the package files (also repairs exec bits lost when the
+# archive was extracted with Windows tools such as Explorer/7z)
 log_info "Fixing permissions..."
 chmod -R +x "$OFFLINE_PACKAGES/node_modules/.bin/" 2>/dev/null || true
 chmod -R +x "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/" 2>/dev/null || true
 if [ -f "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
     chmod +x "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli.js"
 fi
+for _plat_bin in "$OFFLINE_PACKAGES"/node_modules/@anthropic-ai/claude-code-*/claude*; do
+    if [ -f "$_plat_bin" ]; then
+        chmod +x "$_plat_bin" 2>/dev/null || true
+    fi
+done
 
-# Verify claude binary is not a stub placeholder
+# Verify which runtime this package can use (native binary vs Node.js wrapper)
 log_info "Verifying Claude Code binary..."
-CLAUDE_BIN_PATH="$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
-if [ -f "$CLAUDE_BIN_PATH" ]; then
-    BIN_SIZE=$(stat -c%s "$CLAUDE_BIN_PATH" 2>/dev/null || echo "0")
-    if [ "$BIN_SIZE" -lt 100000 ]; then
-        log_warn "Claude binary is a placeholder stub (${BIN_SIZE} bytes), not a real binary"
-        log_warn "This package may not work on the current platform."
-        log_info "The package was built for a different platform."
-        log_info ""
-        log_info "To fix this:"
-        log_info "  1. Download the correct platform binary from npm:"
-        log_info "     npm pack @anthropic-ai/claude-code-linux-x64@<version>   # Linux x64 (glibc)"
-        log_info "     npm pack @anthropic-ai/claude-code-linux-arm64@<version>  # Linux ARM"
-        log_info "     npm pack @anthropic-ai/claude-code-darwin-arm64@<version> # macOS Apple Silicon"
-        log_info "     npm pack @anthropic-ai/claude-code-darwin-x64@<version>  # macOS Intel"
-        log_info "  2. Extract and run postinstall:"
-        log_info "     mkdir -p node_modules/@anthropic-ai/claude-code-linux-x64"
-        log_info "     tar -xzf *.tgz -C node_modules/@anthropic-ai/claude-code-linux-x64 --strip-components=1"
-        log_info "     cd node_modules/@anthropic-ai/claude-code && node install.cjs"
-        log_info ""
-        log_info "Or rebuild the offline package on the target platform."
-        log_info "See README.md '平台支持' section for details."
-        echo ""
+RUNTIME_MODE="$(detect_runtime_mode "$OFFLINE_PACKAGES")"
+NEED_NODE=false
+case "$RUNTIME_MODE" in
+    native)
+        log_ok "Native binary detected, Node.js optional (bin/claude.exe)"
+        ;;
+    platform)
+        log_ok "Native binary detected, Node.js optional (platform package binary)"
+        ;;
+    node)
+        log_warn "No runnable native binary found for this platform"
+        log_info "The package will fall back to the Node.js wrapper (requires Node.js at runtime)"
+        NEED_NODE=true
+        ;;
+esac
 
-        # Fall back to cli-wrapper.cjs
-        log_info "Falling back to cli-wrapper.cjs (requires Node.js at runtime)..."
-        rm -f "$OFFLINE_PACKAGES/node_modules/.bin/claude"
-        cat > "$OFFLINE_PACKAGES/node_modules/.bin/claude" << 'WRAPPER'
-#!/usr/bin/env node
-require('../@anthropic-ai/claude-code/cli-wrapper.cjs');
-WRAPPER
-        chmod +x "$OFFLINE_PACKAGES/node_modules/.bin/claude"
-    else
-        log_ok "Claude binary verified (${BIN_SIZE} bytes)"
-    fi
-elif [ -f "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs" ]; then
-    log_info "No native binary found, using cli-wrapper.cjs fallback"
-    rm -f "$OFFLINE_PACKAGES/node_modules/.bin/claude"
-    cat > "$OFFLINE_PACKAGES/node_modules/.bin/claude" << 'WRAPPER'
-#!/usr/bin/env node
-require('../@anthropic-ai/claude-code/cli-wrapper.cjs');
-WRAPPER
-    chmod +x "$OFFLINE_PACKAGES/node_modules/.bin/claude"
-fi
-
-# Fix the claude launcher script - only if no native binary available
-# Native binary is preferred, cli-wrapper.cjs is second choice, cli.js is fallback
-if [ ! -f "$OFFLINE_PACKAGES/node_modules/.bin/claude" ]; then
-    # No launcher created yet - check what's available
-    CLAUDE_BIN_PATH="$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
-    if [ -f "$CLAUDE_BIN_PATH" ] && [ "$(stat -c%s "$CLAUDE_BIN_PATH" 2>/dev/null || echo 0)" -gt 100000 ]; then
-        # Native binary is valid - link it
-        log_info "Linking native binary..."
-        ln -sf ../@anthropic-ai/claude-code/bin/claude.exe "$OFFLINE_PACKAGES/node_modules/.bin/claude"
-        chmod +x "$OFFLINE_PACKAGES/node_modules/.bin/claude"
-    elif [ -f "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli-wrapper.cjs" ]; then
-        # Use cli-wrapper.cjs as fallback
-        log_info "Creating launcher using cli-wrapper.cjs..."
-        cat > "$OFFLINE_PACKAGES/node_modules/.bin/claude" << 'WRAPPER'
-#!/usr/bin/env node
-require('../@anthropic-ai/claude-code/cli-wrapper.cjs');
-WRAPPER
-        chmod +x "$OFFLINE_PACKAGES/node_modules/.bin/claude"
-    elif [ -f "$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli.js" ]; then
-        # Last fallback - cli.js
-        log_info "Creating launcher using cli.js..."
-        cat > "$OFFLINE_PACKAGES/node_modules/.bin/claude" << 'LAUNCHER'
-#!/usr/bin/env node
-require('../@anthropic-ai/claude-code/cli.js');
-LAUNCHER
-        chmod +x "$OFFLINE_PACKAGES/node_modules/.bin/claude"
-    fi
+# Always rebuild node_modules/.bin/claude as a REAL launcher script (never a
+# symlink). This repairs packages whose symlinks were lost during extraction
+# with Windows tools, and points the launcher at the best available binary.
+set +e
+rebuild_claude_launcher "$OFFLINE_PACKAGES"
+LAUNCHER_RC=$?
+set -e
+if [ "$LAUNCHER_RC" -eq 1 ]; then
+    exit 1
+elif [ "$LAUNCHER_RC" -eq 2 ]; then
+    NEED_NODE=true
 fi
 
 # Set binary path
 if [ -r "$OFFLINE_PACKAGES/node_modules/.bin/claude" ]; then
     CLAUDE_BIN="$OFFLINE_PACKAGES/node_modules/.bin/claude"
 else
-    CLAUDE_BIN="$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/cli.js"
+    CLAUDE_BIN="$OFFLINE_PACKAGES/node_modules/@anthropic-ai/claude-code/bin/claude.exe"
 fi
 
 export PATH="$OFFLINE_PACKAGES/node_modules/.bin:$PATH"
 echo ""
 
 # ---------------------------------------------------------------------------
-# Step 2: Ensure Node.js Environment
+# Step 2: Runtime Environment (Node.js is OPTIONAL for native binaries)
 # ---------------------------------------------------------------------------
-echo "Step 2/7: Ensuring Node.js environment..."
+echo "Step 2/7: Ensuring runtime environment..."
 
-if ! ensure_nodejs; then
-    exit 1
+if [ "$NEED_NODE" = true ]; then
+    # Only the Node.js wrapper fallback truly requires Node.js (>= 18)
+    log_warn "This package requires Node.js (Node.js wrapper fallback)"
+    if ! ensure_nodejs; then
+        exit 1
+    fi
+else
+    # Native binary present: Node.js is optional, offer but skip by default
+    if command_exists node && check_nodejs_requirement; then
+        log_ok "Node.js $(node --version) available (optional)"
+    elif confirm "Install Node.js anyway? (optional; only needed for npm-based tools and the wrapper fallback)" n; then
+        if require_network_or_fail "install Node.js"; then
+            if install_nodejs; then
+                log_ok "Node.js installed (optional)"
+            else
+                log_warn "Node.js installation failed; continuing with the native binary"
+            fi
+        else
+            log_warn "Skipping optional Node.js installation (offline)"
+        fi
+    else
+        log_info "Skipping Node.js installation (not required for the native binary)"
+    fi
 fi
 
 # Clean up old module configuration (if exists)
@@ -1743,7 +2150,7 @@ fi
 # Verify config files
 echo ""
 echo "Checking configuration files..."
-for f in "$SETTINGS_FILE" "$CONFIG_FILE" "$CLAUDE_JSON"; do
+for f in "$USER_CLAUDE_DIR/settings.json" "$USER_CLAUDE_DIR/config.json" "$HOME/.claude.json"; do
     if [ -f "$f" ]; then
         log_ok "$(basename "$f") exists"
     else
@@ -1774,60 +2181,14 @@ if [ -d "$SKILLS_DIR" ] && [ -f "$SKILLS_DIR/install-skills.sh" ]; then
     echo ""
 
     # Check for jq dependency (required by install-skills.sh)
-    if ! command -v jq &>/dev/null; then
-        log_warn "jq is required for skills installation"
-        log_info "Attempting to use bundled jq from offline package..."
-
-        # Try bundled jq first (no sudo required)
-        local bundled_jq=""
-        local os_jq arch_jq
-        os_jq="$(uname -s)"
-        arch_jq="$(uname -m)"
-
-        case "$os_jq" in
-            Linux*)
-                case "$arch_jq" in
-                    x86_64|amd64)   bundled_jq="${OFFLINE_PACKAGES}/tools/jq/linux-amd64/jq" ;;
-                    aarch64|arm64)   bundled_jq="${OFFLINE_PACKAGES}/tools/jq/linux-arm64/jq" ;;
-                esac
-                ;;
-            Darwin*)
-                case "$arch_jq" in
-                    x86_64|amd64)   bundled_jq="${OFFLINE_PACKAGES}/tools/jq/macos-amd64/jq" ;;
-                    arm64)           bundled_jq="${OFFLINE_PACKAGES}/tools/jq/macos-arm64/jq" ;;
-                esac
-                ;;
-        esac
-
-        if [ -n "$bundled_jq" ] && [ -x "$bundled_jq" ]; then
-            # Create a temporary jq in PATH so command -v jq succeeds
-            local tmp_jq_dir
-            tmp_jq_dir=$(mktemp -d)
-            ln -sf "$bundled_jq" "$tmp_jq_dir/jq"
-            export PATH="$tmp_jq_dir:$PATH"
-            log_ok "Using bundled jq from offline package (no sudo required): $bundled_jq"
-        else
-            # Fallback: try to install system jq (requires sudo)
-            log_info "No bundled jq found for ${os_jq}/${arch_jq}, attempting system install..."
-            if command -v apt-get &>/dev/null; then
-                sudo apt-get update && sudo apt-get install -y jq
-            elif command -v yum &>/dev/null; then
-                sudo yum install -y jq
-            elif command -v brew &>/dev/null; then
-                brew install jq
-            else
-                log_error "Could not install jq automatically"
-                log_info "Please install jq manually and run: bash $SKILLS_DIR/install-skills.sh $SKILLS_DIR/offline-skills"
-                SKILLS_DIR=""  # Skip installation
-            fi
-        fi
+    if ! ensure_jq_for_skills "$OFFLINE_PACKAGES"; then
+        log_error "jq is unavailable and could not be set up automatically"
+        log_info "Please install jq manually and run: bash $SKILLS_DIR/install-skills.sh $SKILLS_DIR/offline-skills"
+        SKILLS_DIR=""  # Skip installation
     fi
 
     if [ -n "$SKILLS_DIR" ]; then
-        read -p "Install offline skills? [Y/n]: " -n 1 -r
-        echo
-
-        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        if confirm "Install offline skills?" y; then
             log_info "Running skills installer..."
             if bash "$SKILLS_DIR/install-skills.sh" "$SKILLS_DIR/offline-skills"; then
                 log_ok "Offline skills installed successfully"
@@ -1859,7 +2220,11 @@ echo "  SETUP SUMMARY"
 echo "============================================================================="
 echo ""
 echo "  Configured:"
-echo "    - Node.js environment (>= 18) with automatic mirror detection"
+if [ "$NEED_NODE" = true ]; then
+    echo "    - Node.js environment (>= 18) with automatic mirror detection"
+else
+    echo "    - Native Claude Code binary (standalone, Node.js NOT required)"
+fi
 echo "    - Offline packages at: $OFFLINE_PACKAGES"
 echo "    - ~/.claude/ directory structure"
 echo "    - ~/.claude/settings.json (with placeholder values)"

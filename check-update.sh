@@ -38,12 +38,24 @@ get_current_version() {
 
 # Get latest version from npm
 get_npm_version() {
-    curl -s "https://registry.npmjs.org/${NPM_PACKAGE}" | jq -r '.["dist-tags"].latest' 2>/dev/null || echo ""
+    local response
+    if ! response=$(curl -s --max-time 15 "https://registry.npmjs.org/${NPM_PACKAGE}" 2>/dev/null); then
+        log_warn "Network unreachable or npm registry inaccessible (timed out after 15s)" >&2
+        echo ""
+        return 0
+    fi
+    echo "$response" | jq -r '.["dist-tags"].latest // empty' 2>/dev/null || echo ""
 }
 
 # Get latest version from GitHub Release
 get_github_version() {
-    curl -s "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" | jq -r '.tag_name' 2>/dev/null | sed 's/^v//' || echo ""
+    local response
+    if ! response=$(curl -s --max-time 15 "https://api.github.com/repos/${GITHUB_REPO}/releases/latest" 2>/dev/null); then
+        log_warn "Network unreachable or GitHub inaccessible (timed out after 15s)" >&2
+        echo ""
+        return 0
+    fi
+    echo "$response" | jq -r '.tag_name // empty' 2>/dev/null | sed 's/^v//' || echo ""
 }
 
 # Compare versions
@@ -76,9 +88,9 @@ download_latest() {
     log_info "URL: ${download_url}"
     
     if command -v wget >/dev/null 2>&1; then
-        wget --progress=bar:force -O "$output_file" "$download_url"
+        wget --progress=bar:force --timeout=60 -O "$output_file" "$download_url"
     elif command -v curl >/dev/null 2>&1; then
-        curl -fsSL --progress-bar -o "$output_file" "$download_url"
+        curl -fsSL --progress-bar --max-time 300 -o "$output_file" "$download_url"
     else
         log_error "Neither wget nor curl is available"
         return 1
@@ -90,7 +102,7 @@ download_latest() {
     local checksum_url="https://github.com/${GITHUB_REPO}/releases/download/v${version}/claude-offline-packages.tar.gz.sha256"
     local checksum_file="${output_file}.sha256"
     
-    if curl -fsSL -o "$checksum_file" "$checksum_url" 2>/dev/null; then
+    if curl -fsSL --max-time 15 -o "$checksum_file" "$checksum_url" 2>/dev/null; then
         log_info "Verifying checksum..."
         if sha256sum -c "$checksum_file" 2>/dev/null; then
             log_ok "Checksum verified"
