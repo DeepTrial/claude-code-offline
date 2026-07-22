@@ -5,6 +5,7 @@
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Enabled-blue)](../../.github/workflows/download-claude-packages.yml)
 [![Version](https://img.shields.io/badge/version-2.2-green)](../../setup-claude-code.sh)
 [![License](https://img.shields.io/badge/license-MIT-yellow)](../../LICENSE)
+[![Codex Offline](https://img.shields.io/badge/sister%20project-Codex%20Offline-blueviolet)](https://github.com/DeepTrial/codex-offline)
 
 An automated offline deployment solution for Claude Code: it pulls the latest Claude Code from npm every day, builds **dual-platform offline packages for Linux and Windows**, and publishes them to GitHub Releases after **automated installation testing**. Supports automatic mirror detection, region restriction bypass, fully offline installation, and environments without Node.js.
 

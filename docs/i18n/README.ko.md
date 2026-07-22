@@ -5,6 +5,7 @@
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Enabled-blue)](../../.github/workflows/download-claude-packages.yml)
 [![Version](https://img.shields.io/badge/version-2.2-green)](../../setup-claude-code.sh)
 [![License](https://img.shields.io/badge/license-MIT-yellow)](../../LICENSE)
+[![Codex Offline](https://img.shields.io/badge/sister%20project-Codex%20Offline-blueviolet)](https://github.com/DeepTrial/codex-offline)
 
 자동화된 Claude Code 오프라인 배포 솔루션: 매일 npm에서 최신 버전의 Claude Code를 가져와 **Linux와 Windows 듀얼 플랫폼 오프라인 패키지**를 빌드하고, **자동화된 설치 테스트**를 거쳐 GitHub Releases에 게시합니다. 미러 소스 자동 감지, 지역 제한 우회, 완전 오프라인 설치, Node.js 없는 환경을 지원합니다.
 

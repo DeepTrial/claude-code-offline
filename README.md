@@ -5,6 +5,7 @@
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Enabled-blue)](.github/workflows/download-claude-packages.yml)
 [![Version](https://img.shields.io/badge/version-2.2-green)](setup-claude-code.sh)
 [![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+[![Codex Offline](https://img.shields.io/badge/sister%20project-Codex%20Offline-blueviolet)](https://github.com/DeepTrial/codex-offline)
 
 自动化的 Claude Code 离线部署方案：每天自动从 npm 拉取最新版 Claude Code，构建 **Linux 与 Windows 双平台离线包**，经过**自动化安装测试**后发布到 GitHub Releases。支持镜像源自动检测、地区限制绕过、纯离线安装和无 Node.js 环境。
 
