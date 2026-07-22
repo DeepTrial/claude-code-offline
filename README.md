@@ -3,7 +3,7 @@
 > **简体中文** | [English](docs/i18n/README.en.md) | [繁體中文](docs/i18n/README.zh-TW.md) | [Русский](docs/i18n/README.ru.md) | [日本語](docs/i18n/README.ja.md) | [한국어](docs/i18n/README.ko.md)
 
 [![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-Enabled-blue)](.github/workflows/download-claude-packages.yml)
-[![Version](https://img.shields.io/badge/version-2.2-green)](setup-claude-code.sh)
+[![Version](https://img.shields.io/npm/v/@anthropic-ai/claude-code?label=version&color=green)](https://www.npmjs.com/package/@anthropic-ai/claude-code)
 [![License](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
 [![Codex Offline](https://img.shields.io/badge/sister%20project-Codex%20Offline-blueviolet)](https://github.com/DeepTrial/codex-offline)
 
