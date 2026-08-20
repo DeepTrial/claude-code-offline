@@ -172,6 +172,24 @@ bash check-update.sh --install    # 下载并安装
 | `--uninstall` | 卸载 Claude Code 及配置 |
 | `--help, -h` | 帮助 |
 
+#### `--config-only`：仅生成配置文件（跳过安装）
+
+当需要**复用已安装的 Claude Code**，只想（重新）生成 `settings.json` 与 `.claude.json` 而不重装二进制 / 修改 `PATH` 时，使用此模式：
+
+```bash
+bash setup-claude-code.sh --config-only
+# Windows (PowerShell)
+pwsh setup-claude-code.ps1 -ConfigOnly
+```
+
+行为：
+- **跳过** Claude Code 包下载 / 解压、原生二进制安装与 `PATH` 写入；
+- **生成 / 更新** `~/.claude/settings.json`（含 `ANTHROPIC_BASE_URL` 等占位环境变量、`autoUpdate: false`）与 `~/.claude.json`（`hasCompletedOnboarding: true`）；
+- 已有文件先自动备份到 `~/.claude/backups/` 再覆盖，不会直接破坏原配置；
+- PowerShell 版对应开关为 `-ConfigOnly`（见脚本 `param` 段）。
+
+典型场景：离线包已就位、或仅想初始化/修复配置文件结构时使用。
+
 ### 环境变量（自定义镜像）
 
 | 变量 | 说明 | 示例 |
