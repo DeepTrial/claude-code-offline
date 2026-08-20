@@ -12,11 +12,12 @@ on:
         description: 'Build specific version (e.g., 2.1.79). Leave empty to use latest.'
         required: false
         default: ''
-  # Daily check for new versions at 00:00 UTC
-  # Weekly full rebuild every Monday at 00:00 UTC
+  # Frequent check for new versions: every 4 hours (UTC 00/04/08/12/16/20)
+  # covers official release windows (main peak UTC 18-24) so we lag <=1 version.
+  # Weekly full rebuild every Monday at 01:00 UTC (offset to avoid double-run with 00:00).
   schedule:
-    - cron: '0 0 * * *'   # Daily
-    - cron: '0 1 * * 1'   # Weekly (Monday 01:00, offset to avoid double-run)
+    - cron: '0 0,4,8,12,16,20 * * *'   # Every 4 hours
+    - cron: '0 1 * * 1'                # Weekly (Monday 01:00 UTC)
 
 env:
   # claude-code 2.x package.json engines require node >= 22 for the npm wrapper
