@@ -48,14 +48,14 @@ export PATH="/opt/claude-offline-packages/node_modules/.bin:$PATH"
 
 ```bash
 # 方式 A：直接给压缩包（推荐，带校验和验证）
-bash update-offline.sh claude-offline-packages-linux.tar.gz
+bash update-offline.sh claude-offline-packages-linux-x86_64.tar.gz
 
 # 方式 B：先解压，给目录
-tar -xzf claude-offline-packages-linux.tar.gz
+tar -xzf claude-offline-packages-linux-x86_64.tar.gz
 bash claude-offline-packages/update-offline.sh ./claude-offline-packages
 
 # 无人值守
-bash update-offline.sh claude-offline-packages-linux.tar.gz --yes
+bash update-offline.sh claude-offline-packages-linux-x86_64.tar.gz --yes
 ```
 
 > 旧包（v2.1.x 早期）里没有 `update-offline.sh` 时，用新包里的那份即可：
@@ -78,7 +78,7 @@ bash update-offline.sh claude-offline-packages-linux.tar.gz --yes
 
 Windows 包沿用「重跑安装器」模型（安装器是幂等的）：
 
-1. 下载新版 `claude-offline-packages-windows.zip` 并解压到**新目录**
+1. 下载新版 `claude-offline-packages-windows-x86_64.zip` 并解压到**新目录**
 2. 重跑安装器，指向新目录：
 
 ```powershell
@@ -183,7 +183,7 @@ x64 机器会直接拒绝；反之 x64 包装到 ARM64 机器会给出警告（�
 **Q: 包损坏怎么办？**
 把 `.sha256` 文件和包放在一起，`update-offline.sh` 会自动做
 `sha256sum -c`，校验失败拒绝安装。也可以手动先验证：
-`sha256sum -c claude-offline-packages-linux.tar.gz.sha256`
+`sha256sum -c claude-offline-packages-linux-x86_64.tar.gz.sha256`
 
 **Q: 能跨多个版本升级吗？**
 可以，没有中间版本要求——每个 Release 都是完整包。

@@ -38,8 +38,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/DeepTrial/claude-code-offlin
 **방법 2: 오프라인 패키지로 설치(네트워크 불필요)**
 
 ```bash
-# Releases에서 claude-offline-packages-linux.tar.gz를 다운로드한 후:
-tar -xzf claude-offline-packages-linux.tar.gz
+# Releases에서 claude-offline-packages-linux-x86_64.tar.gz를 다운로드한 후:
+tar -xzf claude-offline-packages-linux-x86_64.tar.gz
 cd claude-offline-packages
 bash setup-claude-code.sh --yes
 ```
@@ -52,7 +52,7 @@ bash setup-claude-code.sh --offline-path /path/to/claude-offline-packages
 
 ### Windows(네이티브)
 
-1. [Releases](https://github.com/DeepTrial/claude-code-offline/releases)에서 `claude-offline-packages-windows.zip`을 다운로드하여 압축 해제
+1. [Releases](https://github.com/DeepTrial/claude-code-offline/releases)에서 `claude-offline-packages-windows-x86_64.zip`을 다운로드하여 압축 해제
 2. `setup-claude-code.bat`을 더블 클릭하거나 PowerShell에서 실행:
 
 ```powershell
@@ -99,10 +99,10 @@ claude --version
 
 | 파일 | 플랫폼 | 설명 |
 |------|--------|------|
-| `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | 전체 오프라인 패키지(skills, jq, VSCode 확장 포함) |
-| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | 위와 동일, ARM64 네이티브 바이너리 |
-| `claude-offline-packages-windows.zip` | Windows x64 | 네이티브 Windows 패키지(skills, jq.exe, PS1 설치 프로그램 포함) |
+| `claude-offline-packages-windows-x86_64.zip` | Windows x86_64 | 네이티브 Windows 패키지(skills, jq.exe, PS1 설치 프로그램 포함) |
 | `claude-offline-packages-windows-arm64.zip` | Windows ARM64 | 위와 동일, ARM64 네이티브 바이너리 |
+| `claude-offline-packages-linux-x86_64.tar.gz` | Linux x86_64 / WSL | 전체 오프라인 패키지(skills, jq, VSCode 확장 포함) |
+| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | 위와 동일, ARM64 네이티브 바이너리 |
 | `*.sha256` | - | 체크섬 파일: `sha256sum -c <file>.sha256` |
 
 이전 Release는 **최신 50개**까지 보존되며, 그보다 오래된 것(tag 포함)은 CI가 자동으로 정리합니다. 언제든 이전 버전을 다운로드하여 롤백할 수 있습니다.
@@ -114,7 +114,7 @@ claude --version
 기본적으로 **이미 설치된 skills만** 업데이트됩니다:
 
 ```bash
-bash update-offline.sh claude-offline-packages-linux.tar.gz --yes   # 업그레이드
+bash update-offline.sh claude-offline-packages-linux-x86_64.tar.gz --yes   # 업그레이드
 bash update-offline.sh --rollback                                    # 롤백
 bash skills/install-skills.sh --list                                 # 설치 상태 확인
 bash skills/install-skills.sh --only docx,pdf --yes                  # 선택 설치
@@ -249,7 +249,7 @@ claude-code 2.x는 Bun으로 컴파일된 독립형 네이티브 바이너리입
 
 ### Windows에서 tar.gz 압축 해제 후 claude가 시작되지 않음(WSL 시나리오)
 
-Windows 압축 해제 도구(파일 탐색기, 7z 등)는 **symlink를 버리기** 때문에 Linux 패키지의 `.bin/claude`가 손실됩니다. 이 설치 프로그램은 자가 복구 기능이 있습니다: 실행할 때마다 `.bin/claude`를 **실제 런처 스크립트**로 다시 만들므로 WSL에서 `setup-claude-code.sh`를 다시 실행하면 됩니다. 네이티브 Windows에서는 `claude-offline-packages-windows.zip`을 직접 다운로드하세요.
+Windows 압축 해제 도구(파일 탐색기, 7z 등)는 **symlink를 버리기** 때문에 Linux 패키지의 `.bin/claude`가 손실됩니다. 이 설치 프로그램은 자가 복구 기능이 있습니다: 실행할 때마다 `.bin/claude`를 **실제 런처 스크립트**로 다시 만들므로 WSL에서 `setup-claude-code.sh`를 다시 실행하면 됩니다. 네이티브 Windows에서는 `claude-offline-packages-windows-x86_64.zip`을 직접 다운로드하세요.
 
 ### claude 명령을 찾을 수 없음
 

@@ -85,15 +85,17 @@ download_latest() {
     local output_file="claude-offline-packages-v${version}.tar.gz"
 
     # Candidate asset names, best match first:
-    #   aarch64/arm64 -> dedicated ARM64 asset, then x64 (with a warning)
-    #   x64           -> platform-suffixed asset, then legacy unsuffixed name
+    #   aarch64/arm64 -> dedicated ARM64 asset, then x86_64 (with a warning)
+    #   x86_64        -> explicit arch asset, then older naming schemes
     local candidates=()
     case "$(uname -m)" in
         aarch64|arm64)
             candidates+=("claude-offline-packages-linux-arm64.tar.gz")
+            candidates+=("claude-offline-packages-linux-x86_64.tar.gz")
             candidates+=("claude-offline-packages-linux.tar.gz")
             ;;
         *)
+            candidates+=("claude-offline-packages-linux-x86_64.tar.gz")
             candidates+=("claude-offline-packages-linux.tar.gz")
             ;;
     esac
@@ -108,9 +110,9 @@ download_latest() {
     local warned_fallback=false
     for asset_name in "${candidates[@]}"; do
         local download_url="${base_url}/${asset_name}"
-        if [ "$warned_fallback" = false ] && [ "$asset_name" = "claude-offline-packages-linux.tar.gz" ] \
-            && [ "${candidates[0]}" != "$asset_name" ]; then
-            log_warn "ARM64 asset not available, falling back to the x64 package (requires emulation)"
+        if [ "$warned_fallback" = false ] && [[ "$asset_name" != *arm64* ]] \
+            && [[ "${candidates[0]}" == *arm64* ]]; then
+            log_warn "ARM64 asset not available, falling back to the x86_64 package (requires emulation)"
             warned_fallback=true
         fi
         log_info "URL: ${download_url}"

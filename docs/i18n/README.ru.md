@@ -38,8 +38,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/DeepTrial/claude-code-offlin
 **Способ 2: установка из офлайн-пакета (интернет не нужен)**
 
 ```bash
-# После загрузки claude-offline-packages-linux.tar.gz из Releases:
-tar -xzf claude-offline-packages-linux.tar.gz
+# После загрузки claude-offline-packages-linux-x86_64.tar.gz из Releases:
+tar -xzf claude-offline-packages-linux-x86_64.tar.gz
 cd claude-offline-packages
 bash setup-claude-code.sh --yes
 ```
@@ -52,7 +52,7 @@ bash setup-claude-code.sh --offline-path /path/to/claude-offline-packages
 
 ### Windows (нативно)
 
-1. Загрузите `claude-offline-packages-windows.zip` со страницы [Releases](https://github.com/DeepTrial/claude-code-offline/releases) и распакуйте архив
+1. Загрузите `claude-offline-packages-windows-x86_64.zip` со страницы [Releases](https://github.com/DeepTrial/claude-code-offline/releases) и распакуйте архив
 2. Дважды щёлкните `setup-claude-code.bat` или выполните в PowerShell:
 
 ```powershell
@@ -99,10 +99,10 @@ claude --version
 
 | Файл | Платформа | Описание |
 |------|-----------|----------|
-| `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | Полный офлайн-пакет (включает skills, jq, расширения VSCode) |
-| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | То же, нативный бинарник ARM64 |
-| `claude-offline-packages-windows.zip` | Windows x64 | Нативный пакет для Windows (включает skills, jq.exe, установщик PS1) |
+| `claude-offline-packages-windows-x86_64.zip` | Windows x86_64 | Нативный пакет для Windows (включает skills, jq.exe, установщик PS1) |
 | `claude-offline-packages-windows-arm64.zip` | Windows ARM64 | То же, нативный бинарник ARM64 |
+| `claude-offline-packages-linux-x86_64.tar.gz` | Linux x86_64 / WSL | Полный офлайн-пакет (включает skills, jq, расширения VSCode) |
+| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | То же, нативный бинарник ARM64 |
 | `*.sha256` | - | Файлы контрольных сумм: `sha256sum -c <file>.sha256` |
 
 Хранятся **последние 50 релизов**; более старые (включая теги) автоматически удаляются CI. Старую версию можно загрузить и откатиться в любой момент.
@@ -114,7 +114,7 @@ claude --version
 по умолчанию обновляются только **уже установленные** skills:
 
 ```bash
-bash update-offline.sh claude-offline-packages-linux.tar.gz --yes   # обновление
+bash update-offline.sh claude-offline-packages-linux-x86_64.tar.gz --yes   # обновление
 bash update-offline.sh --rollback                                    # откат
 bash skills/install-skills.sh --list                                 # что установлено
 bash skills/install-skills.sh --only docx,pdf --yes                  # выборочная установка
@@ -249,7 +249,7 @@ claude-code 2.x — автономный нативный бинарник, ск
 
 ### claude не запускается после распаковки tar.gz в Windows (сценарий WSL)
 
-Средства распаковки Windows (Проводник, 7z и т. п.) **теряют символические ссылки**, из-за чего пропадает `.bin/claude` из пакета Linux. Этот установщик самовосстанавливается: при каждом запуске он пересоздаёт `.bin/claude` как **настоящий скрипт-загрузчик** — достаточно повторно запустить `setup-claude-code.sh` в WSL. Для нативного использования в Windows загружайте `claude-offline-packages-windows.zip`.
+Средства распаковки Windows (Проводник, 7z и т. п.) **теряют символические ссылки**, из-за чего пропадает `.bin/claude` из пакета Linux. Этот установщик самовосстанавливается: при каждом запуске он пересоздаёт `.bin/claude` как **настоящий скрипт-загрузчик** — достаточно повторно запустить `setup-claude-code.sh` в WSL. Для нативного использования в Windows загружайте `claude-offline-packages-windows-x86_64.zip`.
 
 ### Команда claude не найдена
 

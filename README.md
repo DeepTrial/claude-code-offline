@@ -39,8 +39,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/DeepTrial/claude-code-offlin
 **方式 2：离线包安装（无需网络）**
 
 ```bash
-# 从 Releases 下载 claude-offline-packages-linux.tar.gz 后：
-tar -xzf claude-offline-packages-linux.tar.gz
+# 从 Releases 下载 claude-offline-packages-linux-x86_64.tar.gz 后：
+tar -xzf claude-offline-packages-linux-x86_64.tar.gz
 cd claude-offline-packages
 bash setup-claude-code.sh --yes
 ```
@@ -53,7 +53,7 @@ bash setup-claude-code.sh --offline-path /path/to/claude-offline-packages
 
 ### Windows（原生）
 
-1. 从 [Releases](https://github.com/DeepTrial/claude-code-offline/releases) 下载 `claude-offline-packages-windows.zip` 并解压
+1. 从 [Releases](https://github.com/DeepTrial/claude-code-offline/releases) 下载 `claude-offline-packages-windows-x86_64.zip` 并解压
 2. 双击 `setup-claude-code.bat`，或在 PowerShell 中运行：
 
 ```powershell
@@ -100,10 +100,10 @@ claude --version
 
 | 文件 | 平台 | 说明 |
 |------|------|------|
-| `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | 完整离线包（含 skills、jq、VSCode 扩展） |
-| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | 同上，ARM64 原生二进制 |
-| `claude-offline-packages-windows.zip` | Windows x64 | 原生 Windows 包（含 skills、jq.exe、PS1 安装器） |
+| `claude-offline-packages-windows-x86_64.zip` | Windows x86_64 | 原生 Windows 包（含 skills、jq.exe、PS1 安装器） |
 | `claude-offline-packages-windows-arm64.zip` | Windows ARM64 | 同上，ARM64 原生二进制 |
+| `claude-offline-packages-linux-x86_64.tar.gz` | Linux x86_64 / WSL | 完整离线包（含 skills、jq、VSCode 扩展） |
+| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | 同上，ARM64 原生二进制 |
 | `*.sha256` | - | 校验文件：`sha256sum -c <file>.sha256` |
 
 历史 Release 保留**最新 50 个**，超出部分（含 tag）由 CI 自动清理，可随时下载旧版本回退。
@@ -116,7 +116,7 @@ claude --version
 就地替换包目录（PATH 不变）、自动备份旧版、失败自动还原，并默认只更新**已安装过**的 skills:
 
 ```bash
-bash update-offline.sh claude-offline-packages-linux.tar.gz --yes   # 一键升级
+bash update-offline.sh claude-offline-packages-linux-x86_64.tar.gz --yes   # 一键升级
 bash update-offline.sh --rollback                                    # 一键回滚
 bash skills/install-skills.sh --list                                 # 查看可装/已装
 bash skills/install-skills.sh --only docx,pdf --yes                  # 选择性安装
@@ -271,7 +271,7 @@ claude-code 2.x 是 Bun 编译的独立原生二进制。检测到可用二进�
 
 ### 在 Windows 上解压 tar.gz 后 claude 无法启动（WSL 场景）
 
-Windows 解压工具（资源管理器、7z 等）会**丢弃 symlink**，导致 Linux 包的 `.bin/claude` 丢失。本安装器已自愈：每次运行都会把 `.bin/claude` 重建为**实体 launcher 脚本**，在 WSL 里重跑一次 `setup-claude-code.sh` 即可。原生 Windows 使用请直接下载 `claude-offline-packages-windows.zip`。
+Windows 解压工具（资源管理器、7z 等）会**丢弃 symlink**，导致 Linux 包的 `.bin/claude` 丢失。本安装器已自愈：每次运行都会把 `.bin/claude` 重建为**实体 launcher 脚本**，在 WSL 里重跑一次 `setup-claude-code.sh` 即可。原生 Windows 使用请直接下载 `claude-offline-packages-windows-x86_64.zip`。
 
 ### Claude 命令找不到
 

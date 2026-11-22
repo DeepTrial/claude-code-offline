@@ -38,8 +38,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/DeepTrial/claude-code-offlin
 **方法 2:オフラインパッケージでインストール(ネットワーク不要)**
 
 ```bash
-# Releases から claude-offline-packages-linux.tar.gz をダウンロードした後:
-tar -xzf claude-offline-packages-linux.tar.gz
+# Releases から claude-offline-packages-linux-x86_64.tar.gz をダウンロードした後:
+tar -xzf claude-offline-packages-linux-x86_64.tar.gz
 cd claude-offline-packages
 bash setup-claude-code.sh --yes
 ```
@@ -52,7 +52,7 @@ bash setup-claude-code.sh --offline-path /path/to/claude-offline-packages
 
 ### Windows(ネイティブ)
 
-1. [Releases](https://github.com/DeepTrial/claude-code-offline/releases) から `claude-offline-packages-windows.zip` をダウンロードして展開
+1. [Releases](https://github.com/DeepTrial/claude-code-offline/releases) から `claude-offline-packages-windows-x86_64.zip` をダウンロードして展開
 2. `setup-claude-code.bat` をダブルクリックするか、PowerShell で実行:
 
 ```powershell
@@ -99,10 +99,10 @@ claude --version
 
 | ファイル | プラットフォーム | 説明 |
 |----------|------------------|------|
-| `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | 完全なオフラインパッケージ(skills、jq、VSCode 拡張機能を含む) |
-| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | 同上、ARM64 ネイティブバイナリ |
-| `claude-offline-packages-windows.zip` | Windows x64 | ネイティブ Windows パッケージ(skills、jq.exe、PS1 インストーラーを含む) |
+| `claude-offline-packages-windows-x86_64.zip` | Windows x86_64 | ネイティブ Windows パッケージ(skills、jq.exe、PS1 インストーラーを含む) |
 | `claude-offline-packages-windows-arm64.zip` | Windows ARM64 | 同上、ARM64 ネイティブバイナリ |
+| `claude-offline-packages-linux-x86_64.tar.gz` | Linux x86_64 / WSL | 完全なオフラインパッケージ(skills、jq、VSCode 拡張機能を含む) |
+| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | 同上、ARM64 ネイティブバイナリ |
 | `*.sha256` | - | チェックサムファイル:`sha256sum -c <file>.sha256` |
 
 過去の Release は**最新 50 件**まで保持され、それより古いもの(tag を含む)は CI が自動削除します。旧バージョンはいつでもダウンロードしてロールバックできます。
@@ -114,7 +114,7 @@ claude --version
 既定では**インストール済みの skills のみ**更新されます:
 
 ```bash
-bash update-offline.sh claude-offline-packages-linux.tar.gz --yes   # アップグレード
+bash update-offline.sh claude-offline-packages-linux-x86_64.tar.gz --yes   # アップグレード
 bash update-offline.sh --rollback                                    # ロールバック
 bash skills/install-skills.sh --list                                 # インストール状況の確認
 bash skills/install-skills.sh --only docx,pdf --yes                  # 選択インストール
@@ -249,7 +249,7 @@ claude-code 2.x は Bun でコンパイルされた独立したネイティブ�
 
 ### Windows で tar.gz を展開した後に claude が起動しない(WSL のシナリオ)
 
-Windows の展開ツール(エクスプローラー、7z など)は **symlink を破棄する**ため、Linux パッケージの `.bin/claude` が失われます。このインストーラーは自己修復します:実行のたびに `.bin/claude` を**実体のランチャースクリプト**として再構築するため、WSL で `setup-claude-code.sh` を再実行するだけで直ります。ネイティブ Windows で使う場合は `claude-offline-packages-windows.zip` を直接ダウンロードしてください。
+Windows の展開ツール(エクスプローラー、7z など)は **symlink を破棄する**ため、Linux パッケージの `.bin/claude` が失われます。このインストーラーは自己修復します:実行のたびに `.bin/claude` を**実体のランチャースクリプト**として再構築するため、WSL で `setup-claude-code.sh` を再実行するだけで直ります。ネイティブ Windows で使う場合は `claude-offline-packages-windows-x86_64.zip` を直接ダウンロードしてください。
 
 ### claude コマンドが見つからない
 

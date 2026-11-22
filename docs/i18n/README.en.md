@@ -38,8 +38,8 @@ bash <(curl -fsSL https://raw.githubusercontent.com/DeepTrial/claude-code-offlin
 **Option 2: Offline package install (no internet needed)**
 
 ```bash
-# After downloading claude-offline-packages-linux.tar.gz from Releases:
-tar -xzf claude-offline-packages-linux.tar.gz
+# After downloading claude-offline-packages-linux-x86_64.tar.gz from Releases:
+tar -xzf claude-offline-packages-linux-x86_64.tar.gz
 cd claude-offline-packages
 bash setup-claude-code.sh --yes
 ```
@@ -52,7 +52,7 @@ bash setup-claude-code.sh --offline-path /path/to/claude-offline-packages
 
 ### Windows (native)
 
-1. Download `claude-offline-packages-windows.zip` from [Releases](https://github.com/DeepTrial/claude-code-offline/releases) and extract it
+1. Download `claude-offline-packages-windows-x86_64.zip` from [Releases](https://github.com/DeepTrial/claude-code-offline/releases) and extract it
 2. Double-click `setup-claude-code.bat`, or run in PowerShell:
 
 ```powershell
@@ -99,10 +99,10 @@ claude --version
 
 | File | Platform | Description |
 |------|----------|-------------|
-| `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | Full offline package (includes skills, jq, VSCode extensions) |
-| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | Same as above, native ARM64 binary |
-| `claude-offline-packages-windows.zip` | Windows x64 | Native Windows package (includes skills, jq.exe, PS1 installer) |
+| `claude-offline-packages-windows-x86_64.zip` | Windows x86_64 | Native Windows package (includes skills, jq.exe, PS1 installer) |
 | `claude-offline-packages-windows-arm64.zip` | Windows ARM64 | Same as above, native ARM64 binary |
+| `claude-offline-packages-linux-x86_64.tar.gz` | Linux x86_64 / WSL | Full offline package (includes skills, jq, VSCode extensions) |
+| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | Same as above, native ARM64 binary |
 | `*.sha256` | - | Checksum files: `sha256sum -c <file>.sha256` |
 
 The **latest 50 Releases** are kept; older ones (including their tags) are cleaned up automatically by CI. Download any old version to roll back at any time.
@@ -114,7 +114,7 @@ it upgrades in place (PATH untouched), backs up the old package, and by default 
 refreshes the skills you already installed:
 
 ```bash
-bash update-offline.sh claude-offline-packages-linux.tar.gz --yes   # upgrade
+bash update-offline.sh claude-offline-packages-linux-x86_64.tar.gz --yes   # upgrade
 bash update-offline.sh --rollback                                    # roll back
 bash skills/install-skills.sh --list                                 # show installed/available
 bash skills/install-skills.sh --only docx,pdf --yes                  # install selected skills
@@ -250,7 +250,7 @@ claude-code 2.x is a standalone native binary compiled with Bun. When a usable b
 
 ### claude won't start after extracting the tar.gz on Windows (WSL scenario)
 
-Windows extraction tools (Explorer, 7z, etc.) **drop symlinks**, which loses the Linux package's `.bin/claude`. This installer self-heals: every run rebuilds `.bin/claude` as a **real launcher script** — just re-run `setup-claude-code.sh` in WSL. For native Windows usage, download `claude-offline-packages-windows.zip` directly.
+Windows extraction tools (Explorer, 7z, etc.) **drop symlinks**, which loses the Linux package's `.bin/claude`. This installer self-heals: every run rebuilds `.bin/claude` as a **real launcher script** — just re-run `setup-claude-code.sh` in WSL. For native Windows usage, download `claude-offline-packages-windows-x86_64.zip` directly.
 
 ### Claude command not found
 

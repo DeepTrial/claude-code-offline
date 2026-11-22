@@ -26,7 +26,7 @@
 #   -h, --help         Show this help
 #
 # Examples:
-#   bash update-offline.sh claude-offline-packages-linux.tar.gz
+#   bash update-offline.sh claude-offline-packages-linux-x86_64.tar.gz
 #   bash update-offline.sh ./claude-offline-packages --skills docx,pdf,superpowers
 #   bash update-offline.sh --rollback
 # =============================================================================

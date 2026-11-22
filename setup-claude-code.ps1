@@ -47,7 +47,16 @@ $script:ExitCode = 0
 # GitHub Release configuration
 $script:GitHubRepo   = 'DeepTrial/claude-code-offline'
 $script:GitHubApiUrl = "https://api.github.com/repos/$($script:GitHubRepo)/releases/latest"
-$script:AssetName    = 'claude-offline-packages-windows.zip'
+# Candidate asset names, best match first. On ARM64 Windows prefer the ARM64
+# package; the x86_64 package still works via emulation. The unsuffixed name
+# is the legacy (pre-rename) x86_64 asset.
+$script:AssetNames = @('claude-offline-packages-windows-x86_64.zip')
+try {
+    if ([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') {
+        $script:AssetNames = @('claude-offline-packages-windows-arm64.zip') + $script:AssetNames
+    }
+} catch { }
+$script:AssetNames += 'claude-offline-packages-windows.zip'
 
 # Paths
 $script:UserClaudeDir = Join-Path $env:USERPROFILE '.claude'
@@ -176,7 +185,7 @@ function Test-NativeBinary {
     if ($size -lt 100MB) {
         Write-Err "claude.exe is a placeholder stub ($size bytes), not a real Windows binary."
         Write-Host 'This package appears to be built for a different platform.'
-        Write-Host 'Please use the Windows package (claude-offline-packages-windows.zip).'
+        Write-Host 'Please use the Windows package (claude-offline-packages-windows-x86_64.zip / -arm64.zip).'
         return $false
     }
     try {
@@ -206,13 +215,17 @@ function Get-PackageFromGitHub {
         return $null
     }
 
-    $asset = $release.assets | Where-Object { $_.name -eq $script:AssetName } | Select-Object -First 1
+    $asset = $null
+    foreach ($candidate in $script:AssetNames) {
+        $asset = $release.assets | Where-Object { $_.name -eq $candidate } | Select-Object -First 1
+        if ($asset) { break }
+    }
     if (-not $asset) {
-        Write-Err "Asset '$($script:AssetName)' not found in the latest release ($($release.tag_name))."
+        Write-Err "None of the expected assets ($($script:AssetNames -join ', ')) found in the latest release ($($release.tag_name))."
         return $null
     }
 
-    $zipPath = Join-Path $env:TEMP $script:AssetName
+    $zipPath = Join-Path $env:TEMP $asset.name
     Write-Info "Downloading $($asset.browser_download_url) ..."
     try {
         Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -TimeoutSec 600 -UseBasicParsing
@@ -233,10 +246,12 @@ function Get-PackageFromGitHub {
     }
     Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
 
-    # The zip contains a top-level claude-offline-packages-windows directory
-    $nested = Join-Path $DestinationDir 'claude-offline-packages-windows'
-    if (Test-Path (Join-Path $nested 'node_modules\@anthropic-ai\claude-code\bin\claude.exe')) {
-        return $nested
+    # The zip contains a top-level package directory (name depends on arch)
+    foreach ($dirName in @('claude-offline-packages-windows', 'claude-offline-packages-windows-arm64')) {
+        $nested = Join-Path $DestinationDir $dirName
+        if (Test-Path (Join-Path $nested 'node_modules\@anthropic-ai\claude-code\bin\claude.exe')) {
+            return $nested
+        }
     }
     return $DestinationDir
 }

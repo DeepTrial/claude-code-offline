@@ -1409,14 +1409,18 @@ download_offline_packages() {
     local machine_arch
     machine_arch=$(uname -m)
     if [ "$machine_arch" = "aarch64" ] || [ "$machine_arch" = "arm64" ]; then
-        # ARM64: dedicated asset, then fall back to the x64 package with a warning
+        # ARM64: dedicated asset, then fall back to the x86_64 package with a warning
         download_url=$(echo "$release_info" | grep "browser_download_url.*claude-offline-packages-linux-arm64.tar.gz\"" | head -1 | cut -d '"' -f 4)
         if [ -z "$download_url" ]; then
-            log_warn "ARM64 package not found in this release; falling back to the x64 package (requires emulation)"
+            log_warn "ARM64 package not found in this release; falling back to the x86_64 package (requires emulation)"
         fi
     fi
     if [ -z "$download_url" ]; then
-        # Current x64 naming: platform-suffixed asset (matches -windows.zip)
+        # Current naming: explicit arch suffix
+        download_url=$(echo "$release_info" | grep "browser_download_url.*claude-offline-packages-linux-x86_64.tar.gz\"" | head -1 | cut -d '"' -f 4)
+    fi
+    if [ -z "$download_url" ]; then
+        # Older naming: platform-suffixed asset without arch (matches -windows.zip)
         download_url=$(echo "$release_info" | grep "browser_download_url.*claude-offline-packages-linux.tar.gz\"" | head -1 | cut -d '"' -f 4)
     fi
     # Backward compatibility: older releases used the unsuffixed name

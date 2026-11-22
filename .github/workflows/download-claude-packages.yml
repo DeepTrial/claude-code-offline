@@ -108,10 +108,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # x64 keeps the historical asset name (no suffix) for compatibility
           - os: ubuntu-latest
             arch: x64
-            asset_suffix: ''
+            asset_suffix: '-x86_64'
           # Native ARM64 runner: the binary can be executed and verified
           - os: ubuntu-24.04-arm
             arch: arm64
@@ -713,26 +712,15 @@ jobs:
             echo ""
             echo "| File | Platform | Description |"
             echo "|------|----------|-------------|"
-            echo "| \`claude-offline-packages-linux.tar.gz\` | Linux / macOS / WSL (x64) | Offline installation package |"
-            echo "| \`claude-offline-packages-linux-arm64.tar.gz\` | Linux ARM64 | Offline installation package |"
-            echo "| \`claude-offline-packages-windows.zip\` | Windows x64 (native) | Offline installation package |"
+            echo "| \`claude-offline-packages-windows-x86_64.zip\` | Windows x86_64 (native) | Offline installation package |"
             echo "| \`claude-offline-packages-windows-arm64.zip\` | Windows ARM64 (native) | Offline installation package |"
+            echo "| \`claude-offline-packages-linux-x86_64.tar.gz\` | Linux / macOS / WSL (x86_64) | Offline installation package |"
+            echo "| \`claude-offline-packages-linux-arm64.tar.gz\` | Linux ARM64 | Offline installation package |"
             echo "| \`*.sha256\` | - | SHA256 checksums |"
-            echo ""
-            echo "### Quick Start (Linux / macOS / WSL)"
-            echo ""
-            echo '```bash'
-            echo "# 1. Download and extract"
-            echo "tar -xzf claude-offline-packages-linux.tar.gz"
-            echo ""
-            echo "# 2. Run installer (unattended: add --yes)"
-            echo "cd claude-offline-packages"
-            echo "bash setup-claude-code.sh"
-            echo '```'
             echo ""
             echo "### Quick Start (Windows)"
             echo ""
-            echo "1. Download \`claude-offline-packages-windows.zip\` and extract it"
+            echo "1. Download \`claude-offline-packages-windows-x86_64.zip\` (or \`-arm64\` on ARM64) and extract it"
             echo "2. Double-click \`setup-claude-code.bat\`, or run in PowerShell:"
             echo ""
             echo '```powershell'
@@ -743,18 +731,29 @@ jobs:
             echo "Node.js is NOT required. The installer adds the binary directory to your"
             echo "user PATH and creates \`%USERPROFILE%\.claude\settings.json\`."
             echo ""
+            echo "### Quick Start (Linux / macOS / WSL)"
+            echo ""
+            echo '```bash'
+            echo "# 1. Download claude-offline-packages-linux-x86_64.tar.gz (or -arm64) and extract"
+            echo "tar -xzf claude-offline-packages-linux-x86_64.tar.gz"
+            echo ""
+            echo "# 2. Run installer (unattended: add --yes)"
+            echo "cd claude-offline-packages"
+            echo "bash setup-claude-code.sh"
+            echo '```'
+            echo ""
             echo "### Verification"
             echo ""
             echo '```bash'
-            echo "sha256sum -c claude-offline-packages-linux.tar.gz.sha256"
-            echo "sha256sum -c claude-offline-packages-windows.zip.sha256"
+            echo "sha256sum -c claude-offline-packages-windows-x86_64.zip.sha256"
+            echo "sha256sum -c claude-offline-packages-linux-x86_64.tar.gz.sha256"
             echo '```'
             echo ""
             echo "### Package Contents"
             echo ""
 
             # Gather package metadata
-            PKG_SIZE=$(du -sh claude-offline-packages-linux.tar.gz 2>/dev/null | cut -f1 || echo "N/A")
+            PKG_SIZE=$(du -sh "claude-offline-packages-linux${{ matrix.asset_suffix }}.tar.gz" 2>/dev/null | cut -f1 || echo "N/A")
             HAS_VSCODE=$(test -f claude-offline-packages/anthropic.claude-code.vsix && echo "✅ Included" || echo "❌ Not available")
             SKILL_COUNT=$(find claude-offline-packages/skills/offline-skills -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
             JQ_PLATFORMS=$(ls claude-offline-packages/skills/bin/ 2>/dev/null | tr '\n' ', ' | sed 's/, $//')
@@ -811,11 +810,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # x64 keeps the historical asset name (no suffix) for compatibility
           - os: windows-latest
             arch: x64
             platform_pkg: win32-x64
-            asset_suffix: ''
+            asset_suffix: '-x86_64'
+            dir_suffix: ''
             can_run: 'true'
           # ARM64 is cross-assembled on the x64 runner: the PE binary cannot be
           # executed there, so verification is size + PE machine type instead.
@@ -823,6 +822,7 @@ jobs:
             arch: arm64
             platform_pkg: win32-arm64
             asset_suffix: '-arm64'
+            dir_suffix: '-arm64'
             can_run: 'false'
     steps:
       - name: Checkout repository
@@ -854,7 +854,7 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $ver = "${{ needs.check-version.outputs.latest_version }}"
-          $root = "$env:GITHUB_WORKSPACE\claude-offline-packages-windows${{ matrix.asset_suffix }}"
+          $root = "$env:GITHUB_WORKSPACE\claude-offline-packages-windows${{ matrix.dir_suffix }}"
           $mainDir = "$root\node_modules\@anthropic-ai\claude-code"
           $platDir = "$root\node_modules\@anthropic-ai\claude-code-${{ matrix.platform_pkg }}"
           New-Item -ItemType Directory -Path $mainDir, $platDir -Force | Out-Null
@@ -904,7 +904,7 @@ jobs:
             echo "jq not found, installing via chocolatey..."
             choco install jq -y --no-progress
           fi
-          PKG_DIR="claude-offline-packages-windows${{ matrix.asset_suffix }}"
+          PKG_DIR="claude-offline-packages-windows${{ matrix.dir_suffix }}"
           mkdir -p "$PKG_DIR/skills/offline-skills"
           bash skills/download-skills.sh "$PKG_DIR/skills/offline-skills"
           cp skills/install-skills.sh "$PKG_DIR/skills/"
@@ -924,7 +924,7 @@ jobs:
           # windows-amd64 jq also runs on Windows ARM64 via built-in x64 emulation
           mkdir -p /tmp/jqdl
           bash skills/download-jq.sh --all /tmp/jqdl
-          PKG_DIR="claude-offline-packages-windows${{ matrix.asset_suffix }}"
+          PKG_DIR="claude-offline-packages-windows${{ matrix.dir_suffix }}"
           mkdir -p "$PKG_DIR/skills/bin/windows-amd64"
           cp /tmp/jqdl/windows-amd64/jq.exe "$PKG_DIR/skills/bin/windows-amd64/"
           ls -la "$PKG_DIR/skills/bin/windows-amd64/"
@@ -933,7 +933,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $root = "$env:GITHUB_WORKSPACE\claude-offline-packages-windows${{ matrix.asset_suffix }}"
+          $root = "$env:GITHUB_WORKSPACE\claude-offline-packages-windows${{ matrix.dir_suffix }}"
           Copy-Item setup-claude-code.ps1, setup-claude-code.bat $root
           if (Test-Path update-offline.sh) { Copy-Item update-offline.sh $root }
           $info = [ordered]@{
@@ -953,8 +953,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $pkgDir = "claude-offline-packages-windows${{ matrix.asset_suffix }}"
-          $zipName = "$pkgDir.zip"
+          $pkgDir = "claude-offline-packages-windows${{ matrix.dir_suffix }}"
+          $zipName = "claude-offline-packages-windows${{ matrix.asset_suffix }}.zip"
           Compress-Archive -Path $pkgDir -DestinationPath $zipName -Force
           $hash = (Get-FileHash $zipName -Algorithm SHA256).Hash.ToLower()
           "$hash  $zipName" | Out-File -FilePath "$zipName.sha256" -Encoding ascii
@@ -980,17 +980,19 @@ jobs:
         include:
           - os: ubuntu-latest
             part: linux
-            asset_suffix: ''
+            asset_suffix: '-x86_64'
           - os: ubuntu-24.04-arm
             part: linux
             asset_suffix: '-arm64'
           - os: windows-latest
             part: windows
-            asset_suffix: ''
+            asset_suffix: '-x86_64'
+            dir_suffix: ''
             expected_arch: x64
           - os: windows-latest
             part: windows-arm64
             asset_suffix: '-arm64'
+            dir_suffix: '-arm64'
             expected_arch: arm64
     steps:
       - name: Checkout repository (test scripts)
@@ -1039,7 +1041,7 @@ jobs:
         shell: pwsh
         run: |
           Expand-Archive -Path "artifacts\claude-offline-packages-windows${{ matrix.asset_suffix }}.zip" -DestinationPath . -Force
-          Get-ChildItem "claude-offline-packages-windows${{ matrix.asset_suffix }}"
+          Get-ChildItem "claude-offline-packages-windows${{ matrix.dir_suffix }}"
 
       - name: Run windows package tests
         if: matrix.part == 'windows'
@@ -1085,10 +1087,10 @@ jobs:
         run: |
           set -e
           ls -lh dist/
-          for f in claude-offline-packages-linux.tar.gz claude-offline-packages-linux.tar.gz.sha256 \
-                   claude-offline-packages-linux-arm64.tar.gz claude-offline-packages-linux-arm64.tar.gz.sha256 \
-                   claude-offline-packages-windows.zip claude-offline-packages-windows.zip.sha256 \
+          for f in claude-offline-packages-windows-x86_64.zip claude-offline-packages-windows-x86_64.zip.sha256 \
                    claude-offline-packages-windows-arm64.zip claude-offline-packages-windows-arm64.zip.sha256 \
+                   claude-offline-packages-linux-x86_64.tar.gz claude-offline-packages-linux-x86_64.tar.gz.sha256 \
+                   claude-offline-packages-linux-arm64.tar.gz claude-offline-packages-linux-arm64.tar.gz.sha256 \
                    release_body.md; do
             if [ ! -f "dist/$f" ]; then
               echo "ERROR: missing release file: dist/$f"
@@ -1107,14 +1109,14 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            dist/claude-offline-packages-linux.tar.gz
-            dist/claude-offline-packages-linux.tar.gz.sha256
-            dist/claude-offline-packages-linux-arm64.tar.gz
-            dist/claude-offline-packages-linux-arm64.tar.gz.sha256
-            dist/claude-offline-packages-windows.zip
-            dist/claude-offline-packages-windows.zip.sha256
+            dist/claude-offline-packages-windows-x86_64.zip
+            dist/claude-offline-packages-windows-x86_64.zip.sha256
             dist/claude-offline-packages-windows-arm64.zip
             dist/claude-offline-packages-windows-arm64.zip.sha256
+            dist/claude-offline-packages-linux-x86_64.tar.gz
+            dist/claude-offline-packages-linux-x86_64.tar.gz.sha256
+            dist/claude-offline-packages-linux-arm64.tar.gz
+            dist/claude-offline-packages-linux-arm64.tar.gz.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
