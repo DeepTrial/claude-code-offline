@@ -1139,7 +1139,11 @@ jobs:
           echo "Keeping the newest $KEEP_RELEASES releases"
           TOTAL=$(gh release list --repo "$GH_REPO" --limit 1000 --json tagName --jq 'length')
           echo "Current release count: $TOTAL"
-          OLD_TAGS=$(gh release list --repo "$GH_REPO" --limit 1000 --json tagName,createdAt --jq "sort_by(.createdAt) | reverse | .[$KEEP_RELEASES:] | .[].tagName")
+          # NOTE: sort by publishedAt, not createdAt — on this repo every
+          # release shares the same createdAt (bulk migration), so createdAt
+          # ties make the keep-window arbitrary. publishedAt is the real
+          # recency signal. Tag name as tiebreaker for stable ordering.
+          OLD_TAGS=$(gh release list --repo "$GH_REPO" --limit 1000 --json tagName,publishedAt --jq "sort_by(.publishedAt, .tagName) | reverse | .[$KEEP_RELEASES:] | .[].tagName")
           if [ -z "$OLD_TAGS" ]; then
             echo "Nothing to delete (<= $KEEP_RELEASES releases)"
             exit 0
