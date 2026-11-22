@@ -1133,19 +1133,22 @@ jobs:
       - name: Delete releases beyond the keep limit
         run: |
           set -e
+          # gh needs an explicit repo: this job does not check out the repository
+          GH_REPO="${{ github.repository }}"
+          export GH_REPO
           echo "Keeping the newest $KEEP_RELEASES releases"
-          TOTAL=$(gh release list --limit 1000 --json tagName --jq 'length')
+          TOTAL=$(gh release list --repo "$GH_REPO" --limit 1000 --json tagName --jq 'length')
           echo "Current release count: $TOTAL"
-          OLD_TAGS=$(gh release list --limit 1000 --json tagName,createdAt             --jq "sort_by(.createdAt) | reverse | .[$KEEP_RELEASES:] | .[].tagName")
+          OLD_TAGS=$(gh release list --repo "$GH_REPO" --limit 1000 --json tagName,createdAt --jq "sort_by(.createdAt) | reverse | .[$KEEP_RELEASES:] | .[].tagName")
           if [ -z "$OLD_TAGS" ]; then
             echo "Nothing to delete (<= $KEEP_RELEASES releases)"
             exit 0
           fi
           for tag in $OLD_TAGS; do
             echo "Deleting old release: $tag"
-            gh release delete "$tag" --yes --cleanup-tag
+            gh release delete "$tag" --repo "$GH_REPO" --yes --cleanup-tag
           done
-          REMAINING=$(gh release list --limit 1000 --json tagName --jq 'length')
+          REMAINING=$(gh release list --repo "$GH_REPO" --limit 1000 --json tagName --jq 'length')
           echo "Cleanup done. Remaining releases: $REMAINING"
 
   notify-no-build:
