@@ -605,6 +605,7 @@ function Invoke-ConfigOnly {
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+$script:ExitCode = 0
 try {
     if ($Uninstall) {
         Invoke-Uninstall
@@ -613,9 +614,20 @@ try {
     } else {
         Invoke-Install
     }
-    exit 0
 } catch {
     Write-Host ''
     Write-Err "Setup failed: $($_.Exception.Message)"
-    exit 1
+    $script:ExitCode = 1
+} finally {
+    # Keep the console window open when the script was started by
+    # double-click / "Run with PowerShell" — otherwise the window closes
+    # before the user can read the result. Skipped in -NonInteractive mode
+    # (CI, scripts) and outside an interactive console host.
+    if (-not $NonInteractive -and [Environment]::UserInteractive -and $Host.Name -eq 'ConsoleHost') {
+        Write-Host ''
+        try {
+            Read-Host 'Press Enter to exit (按回车退出)'
+        } catch { }
+    }
 }
+exit $script:ExitCode
