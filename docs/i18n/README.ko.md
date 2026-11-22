@@ -100,10 +100,28 @@ claude --version
 | 파일 | 플랫폼 | 설명 |
 |------|--------|------|
 | `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | 전체 오프라인 패키지(skills, jq, VSCode 확장 포함) |
+| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | 위와 동일, ARM64 네이티브 바이너리 |
 | `claude-offline-packages-windows.zip` | Windows x64 | 네이티브 Windows 패키지(skills, jq.exe, PS1 설치 프로그램 포함) |
+| `claude-offline-packages-windows-arm64.zip` | Windows ARM64 | 위와 동일, ARM64 네이티브 바이너리 |
 | `*.sha256` | - | 체크섬 파일: `sha256sum -c <file>.sha256` |
 
-이전 Release는 **모두 보존**되며, 언제든 이전 버전을 다운로드하여 롤백할 수 있습니다.
+이전 Release는 **최신 50개**까지 보존되며, 그보다 오래된 것(tag 포함)은 CI가 자동으로 정리합니다. 언제든 이전 버전을 다운로드하여 롤백할 수 있습니다.
+
+### 오프라인 업그레이드
+
+새 패키지를 오프라인 머신에 복사하고 동봉된 `update-offline.sh`를 실행하면
+인플레이스 업그레이드(PATH 변경 없음, 자동 백업, 원클릭 롤백)가 수행되며,
+기본적으로 **이미 설치된 skills만** 업데이트됩니다:
+
+```bash
+bash update-offline.sh claude-offline-packages-linux.tar.gz --yes   # 업그레이드
+bash update-offline.sh --rollback                                    # 롤백
+bash skills/install-skills.sh --list                                 # 설치 상태 확인
+bash skills/install-skills.sh --only docx,pdf --yes                  # 선택 설치
+bash skills/install-skills.sh --update --yes                         # 설치된 항목만 업데이트
+```
+
+전체 설계는 [docs/OFFLINE-UPDATE.md](../OFFLINE-UPDATE.md)(중국어)를 참조하세요.
 
 ---
 
@@ -151,7 +169,7 @@ bash check-update.sh --install    # 다운로드 및 설치
 
 기본적으로 **linux-x64**와 **win32-x64**가 자동으로 빌드됩니다. 설치 프로그램은 네이티브 바이너리가 감지되면 Node.js를 건너뜁니다. Node.js ≥ 18(22 권장)은 Node wrapper로 폴백해야 할 때만 필요합니다.
 
-다른 플랫폼(linux-arm64, darwin, musl)은 포크 후 workflow에서 플랫폼 패키지 이름을 수정하여 직접 빌드하거나, Release 페이지의 안내에 따라 `npm pack`으로 수동으로 패키지를 구성하세요.
+다른 플랫폼(darwin, musl)은 포크 후 workflow에서 플랫폼 패키지 이름을 수정하여 직접 빌드하거나, Release 페이지의 안내에 따라 `npm pack`으로 수동으로 패키지를 구성하세요.
 
 ---
 

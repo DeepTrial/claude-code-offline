@@ -100,10 +100,28 @@ claude --version
 | ファイル | プラットフォーム | 説明 |
 |----------|------------------|------|
 | `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | 完全なオフラインパッケージ(skills、jq、VSCode 拡張機能を含む) |
+| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | 同上、ARM64 ネイティブバイナリ |
 | `claude-offline-packages-windows.zip` | Windows x64 | ネイティブ Windows パッケージ(skills、jq.exe、PS1 インストーラーを含む) |
+| `claude-offline-packages-windows-arm64.zip` | Windows ARM64 | 同上、ARM64 ネイティブバイナリ |
 | `*.sha256` | - | チェックサムファイル:`sha256sum -c <file>.sha256` |
 
-過去の Release は**すべて保持**されており、いつでも旧バージョンをダウンロードしてロールバックできます。
+過去の Release は**最新 50 件**まで保持され、それより古いもの(tag を含む)は CI が自動削除します。旧バージョンはいつでもダウンロードしてロールバックできます。
+
+### オフラインアップグレード
+
+新しいパッケージをオフライン環境にコピーし、同梱の `update-offline.sh` を実行するだけで
+インプレースアップグレード(PATH 不変・自動バックアップ・ワンコマンドでロールバック)できます。
+既定では**インストール済みの skills のみ**更新されます:
+
+```bash
+bash update-offline.sh claude-offline-packages-linux.tar.gz --yes   # アップグレード
+bash update-offline.sh --rollback                                    # ロールバック
+bash skills/install-skills.sh --list                                 # インストール状況の確認
+bash skills/install-skills.sh --only docx,pdf --yes                  # 選択インストール
+bash skills/install-skills.sh --update --yes                         # インストール済みのみ更新
+```
+
+詳細設計は [docs/OFFLINE-UPDATE.md](../OFFLINE-UPDATE.md)(中国語)を参照してください。
 
 ---
 
@@ -151,7 +169,7 @@ bash check-update.sh --install    # ダウンロードしてインストール
 
 デフォルトでは **linux-x64** と **win32-x64** が自動ビルドされます。インストーラーはネイティブバイナリを検出した場合 Node.js をスキップします。Node.js ≥ 18(22 推奨)が必要になるのは、Node wrapper へフォールバックする場合のみです。
 
-その他のプラットフォーム(linux-arm64、darwin、musl)は、リポジトリをフォークして workflow 内のプラットフォームパッケージ名を変更して自分でビルドするか、Release ページの説明に従って `npm pack` で手動組み立てしてください。
+その他のプラットフォーム(darwin、musl)は、リポジトリをフォークして workflow 内のプラットフォームパッケージ名を変更して自分でビルドするか、Release ページの説明に従って `npm pack` で手動組み立てしてください。
 
 ---
 

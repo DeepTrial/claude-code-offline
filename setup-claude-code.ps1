@@ -373,11 +373,22 @@ function Add-UserPath {
     $userPath = Get-RawUserPath
     $entries = @($userPath -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     $normalizedTarget = $BinDir.TrimEnd('\').ToLowerInvariant()
-    $exists = $entries | Where-Object { $_.TrimEnd('\').ToLowerInvariant() -eq $normalizedTarget }
-    if ($exists) {
+
+    # Upgrade scenario: drop stale entries that point into OTHER offline
+    # package directories, so an old claude.exe can never shadow the new one.
+    $kept = @($entries | Where-Object {
+        $n = $_.TrimEnd('\').ToLowerInvariant()
+        ($n -eq $normalizedTarget) -or ($_ -notmatch '@anthropic-ai[\\/]claude-code[\\/]bin')
+    })
+    if (($kept.Count -ne $entries.Count)) {
+        Write-Ok 'Removed stale Claude Code entries from user PATH'
+    }
+
+    if ($kept | Where-Object { $_.TrimEnd('\').ToLowerInvariant() -eq $normalizedTarget }) {
         Write-Ok "PATH already contains: $BinDir"
+        if (($kept.Count -ne $entries.Count)) { Set-RawUserPath -NewPath ($kept -join ';') }
     } else {
-        $newPath = (@($entries) + $BinDir) -join ';'
+        $newPath = (@($kept) + $BinDir) -join ';'
         Set-RawUserPath -NewPath $newPath
         Write-Ok "Added to user PATH: $BinDir"
     }

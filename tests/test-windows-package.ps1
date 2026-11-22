@@ -25,7 +25,15 @@ param(
     [string]$PackageDir,
 
     [Parameter(Mandatory = $true)]
-    [string]$ExpectedVersion
+    [string]$ExpectedVersion,
+
+    # Only verify package structure + PE machine type (for cross-built packages
+    # whose binary cannot execute on this runner, e.g. windows-arm64 on x64).
+    [switch]$StructureOnly,
+
+    # Expected PE machine architecture: x64 or arm64
+    [ValidateSet('x64', 'arm64')]
+    [string]$ExpectedArch = 'x64'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,6 +70,21 @@ Ok 'setup-claude-code.ps1 / setup-claude-code.bat present'
 $pkgInfo = Join-Path $PackageDir 'package-info.json'
 if (-not (Test-Path $pkgInfo)) { Fail 'package-info.json is missing' }
 Ok 'package-info.json present'
+
+# PE machine type check: 0x8664 = x64, 0xAA64 = ARM64
+$bytes = [System.IO.File]::ReadAllBytes($exe)
+$peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+$machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+$machineHex = '0x{0:X4}' -f $machine
+$expectedMachine = if ($ExpectedArch -eq 'arm64') { 0xAA64 } else { 0x8664 }
+if ($machine -ne $expectedMachine) { Fail "PE machine type $machineHex does not match expected arch $ExpectedArch" }
+Ok "PE machine type matches $ExpectedArch ($machineHex)"
+
+if ($StructureOnly) {
+    Write-Host ''
+    Write-Host 'ALL WINDOWS PACKAGE (STRUCTURE-ONLY) TESTS PASSED'
+    exit 0
+}
 
 # ---------------------------------------------------------------------------
 # 2. Direct version check

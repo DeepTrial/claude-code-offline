@@ -12,7 +12,7 @@
 ## ✨ 特性
 
 - ✅ **每日自动构建**：GitHub Actions 每天检查 npm 新版本，自动构建并发布
-- ✅ **双平台安装包**：Linux x64(`tar.gz`)+ Windows x64(`zip`，原生 PowerShell 安装器）
+- ✅ **四平台安装包**：Linux x64 / ARM64(`tar.gz`)+ Windows x64 / ARM64(`zip`，原生 PowerShell 安装器）
 - ✅ **测试门禁**：每个包发布前都在干净环境（无 Node 的 ubuntu 容器 / Windows runner）中跑完整安装 + 启动验证，**测试不过不发版**
 - ✅ **无需 Node.js**:claude-code 2.x 是独立原生二进制，检测到原生二进制时 Node.js 可选装
 - ✅ **抗网络抖动**：联网前 5 秒预检、npm/curl 全部带超时、失败即时报错并给出排查建议，不再"卡死"
@@ -21,7 +21,8 @@
 - ✅ **地区限制绕过**：自动配置跳过首次启动的地区验证
 - ✅ **20 个离线 Skills/Plugins**：文档处理、设计、测试、LSP、多智能体框架等
 - ✅ **完整卸载功能**：支持配置备份的彻底卸载
-- ✅ **历史版本全部保留**:Releases 不再自动清理，可随时回退
+- ✅ **Release 数量自控**：自动保留最新 50 个 Release，超出自动清理
+- ✅ **离线升级机制**：新包拷入即升级，已装 skills 自动跟进，可一键回滚（见 [离线升级设计](docs/OFFLINE-UPDATE.md)）
 
 ---
 
@@ -100,19 +101,40 @@ claude --version
 | 文件 | 平台 | 说明 |
 |------|------|------|
 | `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | 完整离线包（含 skills、jq、VSCode 扩展） |
+| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | 同上，ARM64 原生二进制 |
 | `claude-offline-packages-windows.zip` | Windows x64 | 原生 Windows 包（含 skills、jq.exe、PS1 安装器） |
+| `claude-offline-packages-windows-arm64.zip` | Windows ARM64 | 同上，ARM64 原生二进制 |
 | `*.sha256` | - | 校验文件：`sha256sum -c <file>.sha256` |
 
-历史 Release **全部保留**，可随时下载旧版本回退。
+历史 Release 保留**最新 50 个**，超出部分（含 tag）由 CI 自动清理，可随时下载旧版本回退。
+
+---
+
+## 🔄 离线升级与 Skills 管理
+
+已有安装无需重装系统即可升级：把新版离线包拷到离线机器，运行包内 `update-offline.sh`——
+就地替换包目录（PATH 不变）、自动备份旧版、失败自动还原，并默认只更新**已安装过**的 skills:
+
+```bash
+bash update-offline.sh claude-offline-packages-linux.tar.gz --yes   # 一键升级
+bash update-offline.sh --rollback                                    # 一键回滚
+bash skills/install-skills.sh --list                                 # 查看可装/已装
+bash skills/install-skills.sh --only docx,pdf --yes                  # 选择性安装
+bash skills/install-skills.sh --update --yes                         # 只更新已装条目
+```
+
+完整设计（升级原理、Windows 流程、状态文件、卸载单个 skill）见
+[docs/OFFLINE-UPDATE.md](docs/OFFLINE-UPDATE.md)。
 
 ---
 
 ## 🔄 自动化流水线
 
 ```
-check-version → build-offline-packages (linux) ─┐
-              → build-windows-package (windows) ┴→ test-release-package → create-release
-                                                    (ubuntu + windows 双端)   (4 个附件)
+check-version → build-offline-packages (linux x64 + arm64) ─┐
+              → build-windows-package (win x64 + arm64)     ┴→ test-release-package → create-release
+                                                                (4 路并行测试)          (8 个附件)
+                                                              → cleanup-old-releases (保留最新 50 个)
 ```
 
 - **每日检查**:UTC 00:00 对比 npm 最新版与现有 Release，有新版本才构建
@@ -149,9 +171,9 @@ bash check-update.sh --install    # 下载并安装
 
 ## 🖥️ 平台支持
 
-默认自动构建 **linux-x64** 与 **win32-x64**。安装器在检测到原生二进制时跳过 Node.js；仅当需要回退到 Node wrapper 时才要求 Node.js ≥ 18（推荐 22)。
+默认自动构建 **linux-x64**、**linux-arm64**、**win32-x64** 与 **win32-arm64** 四个平台包。安装器在检测到原生二进制时跳过 Node.js；仅当需要回退到 Node wrapper 时才要求 Node.js ≥ 18（推荐 22)。
 
-其他平台（linux-arm64、darwin、musl）可 fork 后修改 workflow 中的平台包名自行构建，或参考 Release 页面说明用 `npm pack` 手工组包。
+其他平台（darwin、musl）可 fork 后修改 workflow 中的平台包名自行构建，或参考 Release 页面说明用 `npm pack` 手工组包。
 
 ---
 

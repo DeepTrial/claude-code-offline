@@ -100,10 +100,26 @@ claude --version
 | 檔案 | 平台 | 說明 |
 |------|------|------|
 | `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | 完整離線套件(含 skills、jq、VSCode 擴充功能) |
+| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | 同上,ARM64 原生二進位 |
 | `claude-offline-packages-windows.zip` | Windows x64 | 原生 Windows 套件(含 skills、jq.exe、PS1 安裝程式) |
+| `claude-offline-packages-windows-arm64.zip` | Windows ARM64 | 同上,ARM64 原生二進位 |
 | `*.sha256` | - | 校驗檔案:`sha256sum -c <file>.sha256` |
 
-歷史 Release **全部保留**,可隨時下載舊版本回退。
+歷史 Release 保留**最新 50 個**,超出部分(含 tag)由 CI 自動清理,可隨時下載舊版本回退。
+
+### 離線升級
+
+將新版離線套件複製到離線機器,執行套件內的 `update-offline.sh` 即可就地升級(PATH 不變、自動備份、可一鍵回滾),並預設只更新**已安裝過**的 skills:
+
+```bash
+bash update-offline.sh claude-offline-packages-linux.tar.gz --yes   # 升級
+bash update-offline.sh --rollback                                    # 回滾
+bash skills/install-skills.sh --list                                 # 檢視可裝/已裝
+bash skills/install-skills.sh --only docx,pdf --yes                  # 選擇性安裝
+bash skills/install-skills.sh --update --yes                         # 只更新已裝項目
+```
+
+完整設計見 [docs/OFFLINE-UPDATE.md](../OFFLINE-UPDATE.md)(簡體中文)。
 
 ---
 
@@ -151,7 +167,7 @@ bash check-update.sh --install    # 下載並安裝
 
 預設自動建置 **linux-x64** 與 **win32-x64**。安裝程式在偵測到原生二進位檔案時跳過 Node.js;僅當需要回退到 Node wrapper 時才要求 Node.js ≥ 18(建議 22)。
 
-其他平台(linux-arm64、darwin、musl)可 fork 後修改 workflow 中的平台套件名稱自行建置,或參考 Release 頁面說明用 `npm pack` 手工組包。
+其他平台(darwin、musl)可 fork 後修改 workflow 中的平台套件名稱自行建置,或參考 Release 頁面說明用 `npm pack` 手工組包。
 
 ---
 

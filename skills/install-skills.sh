@@ -4,18 +4,41 @@
 # =============================================================================
 # Installs offline-compatible skills to the local Claude Code configuration
 #
-# Usage: bash install-skills.sh [skills_dir]
-# Default: ./offline-skills/
+# Usage:
+#   bash install-skills.sh [skills_dir] [options]
+#   bash install-skills.sh --list
+#   bash install-skills.sh --only docx,pdf,superpowers [--yes]
+#   bash install-skills.sh --exclude everything-claude-code [--yes]
+#   bash install-skills.sh --update [--yes]
+#
+# Default source: ./offline-skills/
 # =============================================================================
 
 set -euo pipefail
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SKILLS_SOURCE="${1:-${SCRIPT_DIR}/offline-skills}"
+SKILLS_SOURCE=""
 CLAUDE_SKILLS_DIR="${HOME}/.claude/skills"
 CLAUDE_PLUGINS_DIR="${HOME}/.claude/plugins"
-MANIFEST_FILE="${SKILLS_SOURCE}/skills-manifest.json"
+STATE_FILE="${HOME}/.claude/skills-installed.json"
+MANIFEST_FILE=""
+
+# Selection / mode (populated by argument parsing at the bottom)
+ONLY_CSV=""
+EXCLUDE_CSV=""
+DO_LIST=false
+DO_UPDATE=false
+ASSUME_YES=false
+
+# Membership test for comma-separated lists (no arrays: safe under `set -u`)
+in_list() {
+    [ -z "$1" ] && return 1
+    case ",$1," in
+        *",$2,"*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
 
 # Source common utilities (if available); fall back to local definitions so
 # this script also works inside shipped packages that do not include lib/
@@ -78,9 +101,87 @@ check_source() {
         log_info "Please run download-skills.sh first or specify correct path"
         exit 1
     fi
-    
+
     if [ ! -f "$MANIFEST_FILE" ]; then
         log_warn "Manifest file not found, will install all skills in source directory"
+    fi
+}
+
+# ---------------------------------------------------------------------------
+# Install state tracking (~/.claude/skills-installed.json)
+# Records which bundle entries were installed so that `--update` can later
+# refresh exactly those entries from a newer offline package.
+# ---------------------------------------------------------------------------
+
+# Version of the bundle this installer shipped with (package-info.json lives
+# one level above skills/ inside an offline package).
+get_bundle_version() {
+    local info_file="${SCRIPT_DIR}/../package-info.json"
+    if [ -f "$info_file" ] && [ -n "$JQ_CMD" ]; then
+        $JQ_CMD -r '.version // "unknown"' "$info_file" 2>/dev/null || echo "unknown"
+    else
+        echo "unknown"
+    fi
+}
+
+# Ensure the state file exists with a valid skeleton
+init_state_file() {
+    if [ ! -f "$STATE_FILE" ]; then
+        cat > "$STATE_FILE" << EOF
+{
+  "version": 1,
+  "entries": {}
+}
+EOF
+    fi
+}
+
+# Record one installed entry in the state file
+# Usage: record_install <name> <type> [plugin_key]
+record_install() {
+    local name="$1" type="$2" plugin_key="${3:-}"
+    local bundle_version
+    bundle_version=$(get_bundle_version)
+    local installed_at
+    installed_at=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+    init_state_file
+    local tmp_file
+    tmp_file=$(mktemp)
+    $JQ_CMD --arg name "$name" \
+       --arg type "$type" \
+       --arg key "$plugin_key" \
+       --arg bv "$bundle_version" \
+       --arg time "$installed_at" \
+       '.entries[$name] = {
+          "type": $type,
+          "plugin_key": (if $key == "" then null else $key end),
+          "bundle_version": $bv,
+          "installed_at": $time
+        }' "$STATE_FILE" > "$tmp_file" && mv "$tmp_file" "$STATE_FILE"
+}
+
+# List entry names recorded in the state file (one per line)
+# (`tr -d '\r'`: the bundled Windows jq.exe emits CRLF line endings)
+state_entries() {
+    [ -f "$STATE_FILE" ] || return 0
+    $JQ_CMD -r '.entries | keys[]' "$STATE_FILE" 2>/dev/null | tr -d '\r' || true
+}
+
+# Best-effort discovery of what is installed when no state file exists yet
+# (installations done by older versions of this installer).
+discover_installed_entries() {
+    # Skills: directories under ~/.claude/skills
+    if [ -d "$CLAUDE_SKILLS_DIR" ]; then
+        for d in "$CLAUDE_SKILLS_DIR"/*/; do
+            [ -d "$d" ] && basename "$d"
+        done
+    fi
+    # Plugins: bundle names are cached at plugins/cache/<marketplace>/<name>
+    if [ -d "$CLAUDE_PLUGINS_DIR/cache" ]; then
+        for d in "$CLAUDE_PLUGINS_DIR/cache"/*/*/; do
+            [ -d "$d" ] && basename "$d"
+        done
     fi
 }
 
@@ -176,6 +277,9 @@ install_skill() {
         # Register marketplace in known_marketplaces.json
         register_marketplace "$marketplace_name" "$marketplace_dir"
 
+        # Record in install state (for --update on future bundles)
+        record_install "$skill_name" "plugin" "${plugin_name}@${marketplace_name}"
+
         # Copy rules directory separately (plugins cannot distribute rules automatically)
         # Rules should go directly to ~/.claude/rules/<language>/ (not under plugin name)
         if [ -d "$cache_dir/rules" ]; then
@@ -201,6 +305,8 @@ install_skill() {
         # Copy skill files ('/.' includes dotfiles, unlike a plain '*' glob)
         if cp -r "$source_path"/. "$target_path/" 2>/dev/null; then
             log_ok "  Installed to: ${target_path}"
+            # Record in install state (for --update on future bundles)
+            record_install "$skill_name" "skill"
         else
             log_warn "  Failed to copy some files"
             return 1
@@ -315,6 +421,15 @@ install_all_skills() {
                 continue
             fi
 
+            # Apply --only / --exclude selection
+            if [ -n "$ONLY_CSV" ] && ! in_list "$ONLY_CSV" "$skill_name"; then
+                continue
+            fi
+            if in_list "$EXCLUDE_CSV" "$skill_name"; then
+                log_info "Excluding '${skill_name}' (--exclude)"
+                continue
+            fi
+
             if [ -d "${SKILLS_SOURCE}/${skill_name}" ]; then
                 if install_skill "$skill_name" "$skill_type"; then
                     if [ "$skill_type" = "plugin" ]; then
@@ -329,13 +444,20 @@ install_all_skills() {
                 log_warn "Skill directory not found: ${skill_name}"
                 ((failed++)) || true
             fi
-        done < <($JQ_CMD -r '.skills | to_entries[] | [.key, .value.type // "skill", (if .value.offline_compatible == null then "true" elif .value.offline_compatible == false then "false" else "true" end)] | join("\u001f")' "$MANIFEST_FILE")
+        done < <($JQ_CMD -r '.skills | to_entries[] | [.key, .value.type // "skill", (if .value.offline_compatible == null then "true" elif .value.offline_compatible == false then "false" else "true" end)] | join("\u001f")' "$MANIFEST_FILE" | tr -d '\r')
     else
         # Use directory listing - install as skills by default
         for skill_dir in "$SKILLS_SOURCE"/*/; do
             if [ -d "$skill_dir" ] && [ -f "$skill_dir/SKILL.md" ]; then
                 local skill_name
                 skill_name=$(basename "$skill_dir")
+                if [ -n "$ONLY_CSV" ] && ! in_list "$ONLY_CSV" "$skill_name"; then
+                    continue
+                fi
+                if in_list "$EXCLUDE_CSV" "$skill_name"; then
+                    log_info "Excluding '${skill_name}' (--exclude)"
+                    continue
+                fi
                 if install_skill "$skill_name" "skill"; then
                     ((skills_installed++)) || true
                 else
@@ -471,6 +593,90 @@ print_usage() {
     fi
 }
 
+# List available entries with install status
+cmd_list() {
+    local installed_csv=""
+    local e
+    while IFS= read -r e; do
+        [ -n "$e" ] && installed_csv="${installed_csv:+$installed_csv,}$e"
+    done < <(state_entries)
+
+    # Fall back to filesystem discovery when no state file exists yet
+    if [ -z "$installed_csv" ] && [ ! -f "$STATE_FILE" ]; then
+        while IFS= read -r e; do
+            [ -n "$e" ] && installed_csv="${installed_csv:+$installed_csv,}$e"
+        done < <(discover_installed_entries)
+    fi
+
+    echo ""
+    printf "%-28s %-8s %-10s %s\n" "NAME" "TYPE" "STATUS" "DESCRIPTION"
+    printf "%-28s %-8s %-10s %s\n" "----" "----" "------" "-----------"
+    $JQ_CMD -r '.skills | to_entries[] | [.key, .value.type // "skill", (if .value.offline_compatible == false then "offline-no" else "" end), .value.description // ""] | join("\u001f")' "$MANIFEST_FILE" 2>/dev/null | tr -d '\r' |
+    while IFS=$'\x1f' read -r name type note desc; do
+        local_status="available"
+        if [ "$note" = "offline-no" ]; then
+            local_status="no-offline"
+        elif in_list "$installed_csv" "$name"; then
+            local_status="installed"
+        fi
+        printf "%-28s %-8s %-10s %s\n" "$name" "$type" "$local_status" "$desc"
+    done
+    echo ""
+}
+
+# Update previously installed entries from the current bundle
+cmd_update() {
+    local targets=""
+    local e
+
+    if [ -f "$STATE_FILE" ]; then
+        while IFS= read -r e; do
+            [ -n "$e" ] && targets="${targets:+$targets,}$e"
+        done < <(state_entries)
+    else
+        log_info "No install state file found; detecting installed entries from filesystem..."
+        while IFS= read -r e; do
+            [ -n "$e" ] && targets="${targets:+$targets,}$e"
+        done < <(discover_installed_entries)
+    fi
+
+    if [ -z "$targets" ]; then
+        log_info "Nothing installed yet — nothing to update"
+        log_info "Install skills first: bash install-skills.sh --only <names>"
+        return 0
+    fi
+
+    log_info "Updating installed entries from bundle: ${targets}"
+    echo ""
+
+    local updated=0 skipped=0
+    local OLD_IFS="$IFS"
+    IFS=','
+    for name in $targets; do
+        IFS="$OLD_IFS"
+        if [ ! -d "${SKILLS_SOURCE}/${name}" ]; then
+            log_warn "  '${name}' not present in this bundle — skipped"
+            ((skipped++)) || true
+            continue
+        fi
+        local stype="skill"
+        if [ -f "$MANIFEST_FILE" ]; then
+            stype=$($JQ_CMD -r ".skills[\"${name}\"].type // \"skill\"" "$MANIFEST_FILE" 2>/dev/null | tr -d '\r' || echo "skill")
+        fi
+        log_info "Updating: ${name} (${stype})"
+        if install_skill "$name" "$stype"; then
+            ((updated++)) || true
+        else
+            ((skipped++)) || true
+        fi
+        IFS=','
+    done
+    IFS="$OLD_IFS"
+
+    echo ""
+    log_ok "Updated ${updated} entries (${skipped} skipped)"
+}
+
 # Main function
 main() {
     log_info "Claude Code Skills & Plugins Installer"
@@ -482,13 +688,28 @@ main() {
         exit 1
     fi
 
+    MANIFEST_FILE="${SKILLS_SOURCE}/skills-manifest.json"
+
     check_source
 
+    # --list is read-only: no confirmation, no changes
+    if [ "$DO_LIST" = true ]; then
+        cmd_list
+        exit 0
+    fi
+
     # Ask for confirmation
-    if [ -t 0 ]; then
+    if [ "$ASSUME_YES" != true ] && [ -t 0 ]; then
         echo ""
-        log_info "This will install offline skills to: ${CLAUDE_SKILLS_DIR}"
-        log_info "This will install offline plugins to: ${CLAUDE_PLUGINS_DIR}"
+        if [ "$DO_UPDATE" = true ]; then
+            log_info "This will UPDATE previously installed skills from: ${SKILLS_SOURCE}"
+        elif [ -n "$ONLY_CSV" ]; then
+            log_info "This will install ONLY these entries: ${ONLY_CSV}"
+        else
+            log_info "This will install offline skills to: ${CLAUDE_SKILLS_DIR}"
+            log_info "This will install offline plugins to: ${CLAUDE_PLUGINS_DIR}"
+            [ -n "$EXCLUDE_CSV" ] && log_info "Excluding: ${EXCLUDE_CSV}"
+        fi
         read -p "Continue? [Y/n]: " -n 1 -r
         echo ""
         if [[ ! $REPLY =~ ^[Yy]$ ]] && [ -n "$REPLY" ]; then
@@ -497,7 +718,11 @@ main() {
         fi
     fi
 
-    install_all_skills
+    if [ "$DO_UPDATE" = true ]; then
+        cmd_update
+    else
+        install_all_skills
+    fi
     check_doc_dependencies
     create_skills_config
 
@@ -507,23 +732,68 @@ main() {
     print_usage
 }
 
-# Show help
-if [ "${1:-}" == "--help" ] || [ "${1:-}" == "-h" ]; then
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+show_help() {
     echo "Claude Code Skills & Plugins Installer"
     echo ""
-    echo "Usage: bash install-skills.sh [skills_dir]"
+    echo "Usage: bash install-skills.sh [skills_dir] [options]"
     echo ""
     echo "Arguments:"
-    echo "  skills_dir    Directory containing offline skills and plugins (default: ./offline-skills/)"
+    echo "  skills_dir         Directory containing offline skills and plugins"
+    echo "                     (default: ./offline-skills/ next to this script)"
     echo ""
     echo "Options:"
-    echo "  -h, --help    Show this help message"
+    echo "  --list             List available entries and their install status"
+    echo "  --only a,b,c       Install only the named skills/plugins"
+    echo "  --exclude a,b      Install everything except the named entries"
+    echo "  --update           Update only previously installed entries from this bundle"
+    echo "  --yes, -y          Skip the confirmation prompt (for scripts)"
+    echo "  -h, --help         Show this help message"
     echo ""
     echo "Examples:"
-    echo "  bash install-skills.sh                    # Install from default location"
-    echo "  bash install-skills.sh /path/to/skills    # Install from custom location"
+    echo "  bash install-skills.sh                          # Install everything"
+    echo "  bash install-skills.sh --list                   # Show what is installed"
+    echo "  bash install-skills.sh --only docx,pdf          # Install just docx and pdf"
+    echo "  bash install-skills.sh --only superpowers -y    # Non-interactive single install"
+    echo "  bash install-skills.sh --update -y              # Update installed skills from a new bundle"
     exit 0
+}
+
+POSITIONAL=()
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --list)
+            DO_LIST=true; shift ;;
+        --only)
+            ONLY_CSV="${2:?--only requires a comma-separated list}"; shift 2 ;;
+        --only=*)
+            ONLY_CSV="${1#*=}"; shift ;;
+        --exclude)
+            EXCLUDE_CSV="${2:?--exclude requires a comma-separated list}"; shift 2 ;;
+        --exclude=*)
+            EXCLUDE_CSV="${1#*=}"; shift ;;
+        --update)
+            DO_UPDATE=true; shift ;;
+        --yes|-y)
+            ASSUME_YES=true; shift ;;
+        --help|-h)
+            show_help ;;
+        -*)
+            log_error "Unknown option: $1"
+            echo "Run with --help to see available options."
+            exit 1 ;;
+        *)
+            POSITIONAL+=("$1"); shift ;;
+    esac
+done
+
+if [ ${#POSITIONAL[@]} -gt 0 ]; then
+    SKILLS_SOURCE="${POSITIONAL[0]}"
+else
+    SKILLS_SOURCE="${SCRIPT_DIR}/offline-skills"
 fi
 
 # Run main function
-main "$@"
+main

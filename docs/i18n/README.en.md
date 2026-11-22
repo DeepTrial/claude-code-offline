@@ -100,10 +100,29 @@ claude --version
 | File | Platform | Description |
 |------|----------|-------------|
 | `claude-offline-packages-linux.tar.gz` | Linux x64 / WSL | Full offline package (includes skills, jq, VSCode extensions) |
+| `claude-offline-packages-linux-arm64.tar.gz` | Linux ARM64 | Same as above, native ARM64 binary |
 | `claude-offline-packages-windows.zip` | Windows x64 | Native Windows package (includes skills, jq.exe, PS1 installer) |
+| `claude-offline-packages-windows-arm64.zip` | Windows ARM64 | Same as above, native ARM64 binary |
 | `*.sha256` | - | Checksum files: `sha256sum -c <file>.sha256` |
 
-All historical Releases are **kept** — download any old version to roll back at any time.
+The **latest 50 Releases** are kept; older ones (including their tags) are cleaned up automatically by CI. Download any old version to roll back at any time.
+
+### Upgrading an existing installation (offline)
+
+Copy the new package to the offline machine and run the bundled `update-offline.sh` —
+it upgrades in place (PATH untouched), backs up the old package, and by default only
+refreshes the skills you already installed:
+
+```bash
+bash update-offline.sh claude-offline-packages-linux.tar.gz --yes   # upgrade
+bash update-offline.sh --rollback                                    # roll back
+bash skills/install-skills.sh --list                                 # show installed/available
+bash skills/install-skills.sh --only docx,pdf --yes                  # install selected skills
+bash skills/install-skills.sh --update --yes                         # update installed skills only
+```
+
+See [docs/OFFLINE-UPDATE.md](../OFFLINE-UPDATE.md) for the full design (Windows flow,
+state file, rollback, removing a single skill).
 
 ---
 
@@ -151,7 +170,7 @@ Downloaded automatically at build time according to `skills/skills-manifest.json
 
 **linux-x64** and **win32-x64** are built automatically by default. The installer skips Node.js when a native binary is detected; Node.js ≥ 18 (22 recommended) is required only when falling back to the Node wrapper.
 
-For other platforms (linux-arm64, darwin, musl), fork the repository and modify the platform package names in the workflow to build them yourself, or follow the notes on the Release page to assemble a package manually with `npm pack`.
+For other platforms (darwin, musl), fork the repository and modify the platform package names in the workflow to build them yourself, or follow the notes on the Release page to assemble a package manually with `npm pack`.
 
 ---
 

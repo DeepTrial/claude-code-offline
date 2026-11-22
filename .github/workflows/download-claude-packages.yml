@@ -100,10 +100,22 @@ jobs:
 
   build-offline-packages:
     needs: check-version
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     if: needs.check-version.outputs.should_build == 'true'
     permissions:
       contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x64 keeps the historical asset name (no suffix) for compatibility
+          - os: ubuntu-latest
+            arch: x64
+            asset_suffix: ''
+          # Native ARM64 runner: the binary can be executed and verified
+          - os: ubuntu-24.04-arm
+            arch: arm64
+            asset_suffix: '-arm64'
     
     steps:
       - name: Debug outputs
@@ -181,8 +193,13 @@ jobs:
             fi
           }
 
-          pack_rename "@img/sharp-linux-x64" "img-sharp-linux-x64" "sharp-linux-x64"
-          pack_rename "@img/sharp-libvips-linux-x64" "img-sharp-libvips-linux-x64" "sharp-libvips-linux-x64"
+          if [ "${{ matrix.arch }}" = "arm64" ]; then
+            pack_rename "@img/sharp-linux-arm64" "img-sharp-linux-arm64" "sharp-linux-arm64"
+            pack_rename "@img/sharp-libvips-linux-arm64" "img-sharp-libvips-linux-arm64" "sharp-libvips-linux-arm64"
+          else
+            pack_rename "@img/sharp-linux-x64" "img-sharp-linux-x64" "sharp-linux-x64"
+            pack_rename "@img/sharp-libvips-linux-x64" "img-sharp-libvips-linux-x64" "sharp-libvips-linux-x64"
+          fi
           pack_rename "@musistudio/claude-code-router" "musistudio-claude-code-router" "claude-code-router"
 
           echo "=== Downloaded packages (renamed to match 7z format) ==="
@@ -313,21 +330,14 @@ jobs:
             tar -xzf "$ROUTER_TGZ" -C node_modules/@musistudio/claude-code-router --strip-components=1
           fi
 
-          # Extract @img/sharp-linux-x64 (if exists)
-          if ls sharp-linux-x64-*.tgz 1>/dev/null 2>&1; then
-            SHARP_TGZ=$(ls -t sharp-linux-x64-*.tgz 2>/dev/null | head -1 || true)
-            echo "Extracting: $SHARP_TGZ to node_modules/@img/sharp-linux-x64"
-            mkdir -p node_modules/@img/sharp-linux-x64
-            tar -xzf "$SHARP_TGZ" -C node_modules/@img/sharp-linux-x64 --strip-components=1
-          fi
-
-          # Extract @img/sharp-libvips-linux-x64 (if exists)
-          if ls sharp-libvips-linux-x64-*.tgz 1>/dev/null 2>&1; then
-            SHARP_VIPS_TGZ=$(ls -t sharp-libvips-linux-x64-*.tgz 2>/dev/null | head -1 || true)
-            echo "Extracting: $SHARP_VIPS_TGZ to node_modules/@img/sharp-libvips-linux-x64"
-            mkdir -p node_modules/@img/sharp-libvips-linux-x64
-            tar -xzf "$SHARP_VIPS_TGZ" -C node_modules/@img/sharp-libvips-linux-x64 --strip-components=1
-          fi
+          # Extract @img/sharp platform packages (x64 or arm64, per build leg)
+          for SHARP_TGZ in sharp-linux-*-*.tgz sharp-libvips-linux-*-*.tgz; do
+            [ -f "$SHARP_TGZ" ] || continue
+            SHARP_PKG=$(echo "$SHARP_TGZ" | sed 's/-[0-9][0-9.]*\.tgz$//')
+            echo "Extracting: $SHARP_TGZ to node_modules/@img/$SHARP_PKG"
+            mkdir -p "node_modules/@img/$SHARP_PKG"
+            tar -xzf "$SHARP_TGZ" -C "node_modules/@img/$SHARP_PKG" --strip-components=1
+          done
 
           # Create package.json (for reference)
           CLAUDE_TGZ=$(ls -t claude-code-*.tgz 2>/dev/null | grep -v router | grep -v linux-x64 | head -1 || true)
@@ -541,10 +551,15 @@ jobs:
           
           cp setup-claude-code.sh claude-offline-packages/
           chmod +x claude-offline-packages/setup-claude-code.sh
-          
+
           if [ -f "check-update.sh" ]; then
             cp check-update.sh claude-offline-packages/
             chmod +x claude-offline-packages/check-update.sh
+          fi
+
+          if [ -f "update-offline.sh" ]; then
+            cp update-offline.sh claude-offline-packages/
+            chmod +x claude-offline-packages/update-offline.sh
           fi
           
           echo "Files in package:"
@@ -564,9 +579,10 @@ jobs:
           
           cat > claude-offline-packages/package-info.json << EOF
           {
-            "name": "claude-offline-packages",
+            "name": "claude-offline-packages-linux${{ matrix.asset_suffix }}",
             "version": "${CLAUDE_VERSION}",
             "created_at": "${BUILD_DATE}",
+            "platform": "linux-${{ matrix.arch }}",
             "node_versions_supported": "${{ env.NODE_VERSIONS }}",
             "node_version_min": "22",
             "source": "https://www.npmjs.com/package/@anthropic-ai/claude-code",
@@ -603,20 +619,21 @@ jobs:
             echo "! Warning: VSCode extension not found"
           fi
           
-          tar -czf claude-offline-packages-linux.tar.gz claude-offline-packages/
-          
+          PKG_NAME="claude-offline-packages-linux${{ matrix.asset_suffix }}.tar.gz"
+          tar -czf "$PKG_NAME" claude-offline-packages/
+
           # Calculate checksum
-          sha256sum claude-offline-packages-linux.tar.gz > claude-offline-packages-linux.tar.gz.sha256
-          
+          sha256sum "$PKG_NAME" > "${PKG_NAME}.sha256"
+
           # Show package size
           echo "Package size:"
-          ls -lh claude-offline-packages-linux.tar.gz
-          ls -lh claude-offline-packages-linux.tar.gz.sha256
-          
+          ls -lh "$PKG_NAME"
+          ls -lh "${PKG_NAME}.sha256"
+
           # Verify archive contents
           echo "=== Verifying archive contents ==="
           echo "Looking for VSCode extension in archive:"
-          tar -tzf claude-offline-packages-linux.tar.gz | grep -i "vsix" || echo "! VSCode extension not found in archive"
+          tar -tzf "$PKG_NAME" | grep -i "vsix" || echo "! VSCode extension not found in archive"
 
       - name: Fetch Claude Code changelog
         id: changelog
@@ -670,6 +687,7 @@ jobs:
           fi
 
       - name: Generate release body
+        if: matrix.arch == 'x64'
         run: |
           CLAUDE_VERSION="${{ needs.check-version.outputs.latest_version }}"
           BUILD_DATE=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
@@ -695,10 +713,11 @@ jobs:
             echo ""
             echo "| File | Platform | Description |"
             echo "|------|----------|-------------|"
-            echo "| \`claude-offline-packages-linux.tar.gz\` | Linux / macOS / WSL | Offline installation package |"
-            echo "| \`claude-offline-packages-linux.tar.gz.sha256\` | - | SHA256 checksum |"
-            echo "| \`claude-offline-packages-windows.zip\` | Windows (native) | Offline installation package |"
-            echo "| \`claude-offline-packages-windows.zip.sha256\` | - | SHA256 checksum |"
+            echo "| \`claude-offline-packages-linux.tar.gz\` | Linux / macOS / WSL (x64) | Offline installation package |"
+            echo "| \`claude-offline-packages-linux-arm64.tar.gz\` | Linux ARM64 | Offline installation package |"
+            echo "| \`claude-offline-packages-windows.zip\` | Windows x64 (native) | Offline installation package |"
+            echo "| \`claude-offline-packages-windows-arm64.zip\` | Windows ARM64 (native) | Offline installation package |"
+            echo "| \`*.sha256\` | - | SHA256 checksums |"
             echo ""
             echo "### Quick Start (Linux / macOS / WSL)"
             echo ""
@@ -770,17 +789,41 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: claude-offline-packages-v${{ needs.check-version.outputs.latest_version }}
+          name: claude-offline-packages-linux${{ matrix.asset_suffix }}-v${{ needs.check-version.outputs.latest_version }}
           path: |
-            claude-offline-packages-linux.tar.gz
-            claude-offline-packages-linux.tar.gz.sha256
-            release_body.md
+            claude-offline-packages-linux${{ matrix.asset_suffix }}.tar.gz
+            claude-offline-packages-linux${{ matrix.asset_suffix }}.tar.gz.sha256
+          retention-days: 30
+
+      - name: Upload release body artifact
+        if: matrix.arch == 'x64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-body-v${{ needs.check-version.outputs.latest_version }}
+          path: release_body.md
           retention-days: 30
 
   build-windows-package:
     needs: check-version
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     if: needs.check-version.outputs.should_build == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # x64 keeps the historical asset name (no suffix) for compatibility
+          - os: windows-latest
+            arch: x64
+            platform_pkg: win32-x64
+            asset_suffix: ''
+            can_run: 'true'
+          # ARM64 is cross-assembled on the x64 runner: the PE binary cannot be
+          # executed there, so verification is size + PE machine type instead.
+          - os: windows-latest
+            arch: arm64
+            platform_pkg: win32-arm64
+            asset_suffix: '-arm64'
+            can_run: 'false'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -800,10 +843,10 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $ver = "${{ needs.check-version.outputs.latest_version }}"
-          Write-Host "=== Downloading @anthropic-ai/claude-code@$ver (win32-x64 build) ==="
+          Write-Host "=== Downloading @anthropic-ai/claude-code@$ver (${{ matrix.platform_pkg }} build) ==="
           New-Item -ItemType Directory -Path work -Force | Out-Null
           npm pack "@anthropic-ai/claude-code@$ver" --pack-destination work
-          npm pack "@anthropic-ai/claude-code-win32-x64@$ver" --pack-destination work
+          npm pack "@anthropic-ai/claude-code-${{ matrix.platform_pkg }}@$ver" --pack-destination work
           Get-ChildItem work\*.tgz | Select-Object Name, Length
 
       - name: Assemble windows package
@@ -811,13 +854,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $ver = "${{ needs.check-version.outputs.latest_version }}"
-          $root = "$env:GITHUB_WORKSPACE\claude-offline-packages-windows"
+          $root = "$env:GITHUB_WORKSPACE\claude-offline-packages-windows${{ matrix.asset_suffix }}"
           $mainDir = "$root\node_modules\@anthropic-ai\claude-code"
-          $platDir = "$root\node_modules\@anthropic-ai\claude-code-win32-x64"
+          $platDir = "$root\node_modules\@anthropic-ai\claude-code-${{ matrix.platform_pkg }}"
           New-Item -ItemType Directory -Path $mainDir, $platDir -Force | Out-Null
 
           $mainTgz = Get-ChildItem "work\anthropic-ai-claude-code-$ver.tgz" | Select-Object -First 1
-          $platTgz = Get-ChildItem "work\anthropic-ai-claude-code-win32-x64-$ver.tgz" | Select-Object -First 1
+          $platTgz = Get-ChildItem "work\anthropic-ai-claude-code-${{ matrix.platform_pkg }}-$ver.tgz" | Select-Object -First 1
           Write-Host "Extracting $($mainTgz.Name) -> main package"
           tar -xzf $mainTgz.FullName -C $mainDir --strip-components=1
           Write-Host "Extracting $($platTgz.Name) -> win32-x64 package"
@@ -833,52 +876,71 @@ jobs:
             Write-Error "bin\claude.exe is a stub ($size bytes), not a real Windows binary"
             exit 1
           }
-          & "$mainDir\bin\claude.exe" --version
-          if ($LASTEXITCODE -ne 0) { Write-Error "claude.exe --version failed"; exit 1 }
+          # PE machine type check: 0x8664 = x64, 0xAA64 = ARM64
+          $bytes = [System.IO.File]::ReadAllBytes("$mainDir\bin\claude.exe")
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+          $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+          $machineHex = '0x{0:X4}' -f $machine
+          Write-Host "PE machine type: $machineHex"
+          $expectedMachine = if ('${{ matrix.arch }}' -eq 'arm64') { 0xAA64 } else { 0x8664 }
+          if ($machine -ne $expectedMachine) {
+            Write-Error "PE machine type $machineHex does not match expected arch ${{ matrix.arch }}"
+            exit 1
+          }
+          if ('${{ matrix.can_run }}' -eq 'true') {
+            & "$mainDir\bin\claude.exe" --version
+            if ($LASTEXITCODE -ne 0) { Write-Error "claude.exe --version failed"; exit 1 }
+          } else {
+            Write-Host "Skipping execution check: ${{ matrix.platform_pkg }} binary cannot run on this runner"
+          }
 
       - name: Download offline skills and plugins
         shell: bash
         run: |
           set -e
-          echo "=== Downloading offline-compatible skills and plugins (windows package) ==="
+          echo "=== Downloading offline-compatible skills and plugins (windows${{ matrix.asset_suffix }} package) ==="
           # jq is required by download-skills.sh; install if missing
           if ! command -v jq >/dev/null 2>&1; then
             echo "jq not found, installing via chocolatey..."
             choco install jq -y --no-progress
           fi
-          mkdir -p claude-offline-packages-windows/skills/offline-skills
-          bash skills/download-skills.sh claude-offline-packages-windows/skills/offline-skills
-          cp skills/install-skills.sh claude-offline-packages-windows/skills/
-          cp -r skills/lib claude-offline-packages-windows/skills/
+          PKG_DIR="claude-offline-packages-windows${{ matrix.asset_suffix }}"
+          mkdir -p "$PKG_DIR/skills/offline-skills"
+          bash skills/download-skills.sh "$PKG_DIR/skills/offline-skills"
+          cp skills/install-skills.sh "$PKG_DIR/skills/"
+          cp -r skills/lib "$PKG_DIR/skills/"
           for f in SKILLS-INDEX.md skills-manifest.json; do
-            if [ -f "claude-offline-packages-windows/skills/offline-skills/$f" ]; then
-              cp "claude-offline-packages-windows/skills/offline-skills/$f" claude-offline-packages-windows/skills/
+            if [ -f "$PKG_DIR/skills/offline-skills/$f" ]; then
+              cp "$PKG_DIR/skills/offline-skills/$f" "$PKG_DIR/skills/"
             fi
           done
-          du -sh claude-offline-packages-windows/skills/
+          du -sh "$PKG_DIR/skills/"
 
       - name: Download jq for windows
         shell: bash
         run: |
           set -e
           echo "=== Downloading jq (windows-amd64) for offline use ==="
+          # windows-amd64 jq also runs on Windows ARM64 via built-in x64 emulation
           mkdir -p /tmp/jqdl
           bash skills/download-jq.sh --all /tmp/jqdl
-          mkdir -p claude-offline-packages-windows/skills/bin/windows-amd64
-          cp /tmp/jqdl/windows-amd64/jq.exe claude-offline-packages-windows/skills/bin/windows-amd64/
-          ls -la claude-offline-packages-windows/skills/bin/windows-amd64/
+          PKG_DIR="claude-offline-packages-windows${{ matrix.asset_suffix }}"
+          mkdir -p "$PKG_DIR/skills/bin/windows-amd64"
+          cp /tmp/jqdl/windows-amd64/jq.exe "$PKG_DIR/skills/bin/windows-amd64/"
+          ls -la "$PKG_DIR/skills/bin/windows-amd64/"
 
       - name: Copy setup scripts and package info
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $root = "$env:GITHUB_WORKSPACE\claude-offline-packages-windows"
+          $root = "$env:GITHUB_WORKSPACE\claude-offline-packages-windows${{ matrix.asset_suffix }}"
           Copy-Item setup-claude-code.ps1, setup-claude-code.bat $root
+          if (Test-Path update-offline.sh) { Copy-Item update-offline.sh $root }
           $info = [ordered]@{
-            name = 'claude-offline-packages-windows'
+            name = "claude-offline-packages-windows${{ matrix.asset_suffix }}"
             version = "${{ needs.check-version.outputs.latest_version }}"
             created_at = (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')
-            platform = 'win32-x64'
+            platform = '${{ matrix.platform_pkg }}'
             node_versions_supported = '${{ env.NODE_VERSIONS }}'
             node_version_min = '22'
             source = 'https://www.npmjs.com/package/@anthropic-ai/claude-code'
@@ -891,19 +953,21 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          Compress-Archive -Path claude-offline-packages-windows -DestinationPath claude-offline-packages-windows.zip -Force
-          $hash = (Get-FileHash claude-offline-packages-windows.zip -Algorithm SHA256).Hash.ToLower()
-          "$hash  claude-offline-packages-windows.zip" | Out-File -FilePath claude-offline-packages-windows.zip.sha256 -Encoding ascii
-          Get-Item claude-offline-packages-windows.zip | Select-Object Name, Length
-          Get-Content claude-offline-packages-windows.zip.sha256
+          $pkgDir = "claude-offline-packages-windows${{ matrix.asset_suffix }}"
+          $zipName = "$pkgDir.zip"
+          Compress-Archive -Path $pkgDir -DestinationPath $zipName -Force
+          $hash = (Get-FileHash $zipName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zipName" | Out-File -FilePath "$zipName.sha256" -Encoding ascii
+          Get-Item $zipName | Select-Object Name, Length
+          Get-Content "$zipName.sha256"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: claude-offline-packages-windows-v${{ needs.check-version.outputs.latest_version }}
+          name: claude-offline-packages-windows${{ matrix.asset_suffix }}-v${{ needs.check-version.outputs.latest_version }}
           path: |
-            claude-offline-packages-windows.zip
-            claude-offline-packages-windows.zip.sha256
+            claude-offline-packages-windows${{ matrix.asset_suffix }}.zip
+            claude-offline-packages-windows${{ matrix.asset_suffix }}.zip.sha256
           retention-days: 30
 
   test-release-package:
@@ -916,8 +980,18 @@ jobs:
         include:
           - os: ubuntu-latest
             part: linux
+            asset_suffix: ''
+          - os: ubuntu-24.04-arm
+            part: linux
+            asset_suffix: '-arm64'
           - os: windows-latest
             part: windows
+            asset_suffix: ''
+            expected_arch: x64
+          - os: windows-latest
+            part: windows-arm64
+            asset_suffix: '-arm64'
+            expected_arch: arm64
     steps:
       - name: Checkout repository (test scripts)
         uses: actions/checkout@v4
@@ -927,14 +1001,14 @@ jobs:
         if: matrix.part == 'linux'
         uses: actions/download-artifact@v4
         with:
-          name: claude-offline-packages-v${{ needs.check-version.outputs.latest_version }}
+          name: claude-offline-packages-linux${{ matrix.asset_suffix }}-v${{ needs.check-version.outputs.latest_version }}
           path: artifacts
 
       - name: Extract linux package
         if: matrix.part == 'linux'
         run: |
           set -e
-          tar -xzf artifacts/claude-offline-packages-linux.tar.gz -C .
+          tar -xzf "artifacts/claude-offline-packages-linux${{ matrix.asset_suffix }}.tar.gz" -C .
           ls claude-offline-packages/
 
       - name: Run linux package tests
@@ -943,20 +1017,29 @@ jobs:
           chmod +x tests/test-linux-package.sh
           bash tests/test-linux-package.sh "$GITHUB_WORKSPACE/claude-offline-packages" "${{ needs.check-version.outputs.latest_version }}"
 
+      - name: Run offline upgrade flow test
+        if: matrix.part == 'linux'
+        run: |
+          if ! command -v jq >/dev/null 2>&1; then
+            sudo apt-get update && sudo apt-get install -y jq
+          fi
+          chmod +x tests/test-update-offline.sh
+          bash tests/test-update-offline.sh
+
       # ---------------- Windows part ----------------
       - name: Download windows artifact
-        if: matrix.part == 'windows'
+        if: matrix.part == 'windows' || matrix.part == 'windows-arm64'
         uses: actions/download-artifact@v4
         with:
-          name: claude-offline-packages-windows-v${{ needs.check-version.outputs.latest_version }}
+          name: claude-offline-packages-windows${{ matrix.asset_suffix }}-v${{ needs.check-version.outputs.latest_version }}
           path: artifacts
 
       - name: Extract windows package
-        if: matrix.part == 'windows'
+        if: matrix.part == 'windows' || matrix.part == 'windows-arm64'
         shell: pwsh
         run: |
-          Expand-Archive -Path artifacts\claude-offline-packages-windows.zip -DestinationPath . -Force
-          Get-ChildItem claude-offline-packages-windows
+          Expand-Archive -Path "artifacts\claude-offline-packages-windows${{ matrix.asset_suffix }}.zip" -DestinationPath . -Force
+          Get-ChildItem "claude-offline-packages-windows${{ matrix.asset_suffix }}"
 
       - name: Run windows package tests
         if: matrix.part == 'windows'
@@ -967,6 +1050,17 @@ jobs:
             -ExpectedVersion "${{ needs.check-version.outputs.latest_version }}"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Run windows-arm64 structural tests
+        if: matrix.part == 'windows-arm64'
+        shell: pwsh
+        run: |
+          # The ARM64 PE binary cannot execute on this x64 runner: structure only
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests\test-windows-package.ps1 `
+            -PackageDir "$env:GITHUB_WORKSPACE\claude-offline-packages-windows-arm64" `
+            -ExpectedVersion "${{ needs.check-version.outputs.latest_version }}" `
+            -StructureOnly -ExpectedArch arm64
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   create-release:
     needs: [check-version, test-release-package]
     runs-on: ubuntu-latest
@@ -974,16 +1068,17 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Download linux artifact
+      - name: Download all package artifacts
         uses: actions/download-artifact@v4
         with:
-          name: claude-offline-packages-v${{ needs.check-version.outputs.latest_version }}
+          pattern: claude-offline-packages-*-v${{ needs.check-version.outputs.latest_version }}
           path: dist
+          merge-multiple: true
 
-      - name: Download windows artifact
+      - name: Download release body artifact
         uses: actions/download-artifact@v4
         with:
-          name: claude-offline-packages-windows-v${{ needs.check-version.outputs.latest_version }}
+          name: release-body-v${{ needs.check-version.outputs.latest_version }}
           path: dist
 
       - name: Verify release files
@@ -991,7 +1086,9 @@ jobs:
           set -e
           ls -lh dist/
           for f in claude-offline-packages-linux.tar.gz claude-offline-packages-linux.tar.gz.sha256 \
+                   claude-offline-packages-linux-arm64.tar.gz claude-offline-packages-linux-arm64.tar.gz.sha256 \
                    claude-offline-packages-windows.zip claude-offline-packages-windows.zip.sha256 \
+                   claude-offline-packages-windows-arm64.zip claude-offline-packages-windows-arm64.zip.sha256 \
                    release_body.md; do
             if [ ! -f "dist/$f" ]; then
               echo "ERROR: missing release file: dist/$f"
@@ -1012,13 +1109,44 @@ jobs:
           files: |
             dist/claude-offline-packages-linux.tar.gz
             dist/claude-offline-packages-linux.tar.gz.sha256
+            dist/claude-offline-packages-linux-arm64.tar.gz
+            dist/claude-offline-packages-linux-arm64.tar.gz.sha256
             dist/claude-offline-packages-windows.zip
             dist/claude-offline-packages-windows.zip.sha256
+            dist/claude-offline-packages-windows-arm64.zip
+            dist/claude-offline-packages-windows-arm64.zip.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # NOTE: All releases are kept indefinitely (no automatic cleanup).
-  # If old releases ever need pruning, do it manually from the Releases page.
+  # Keep at most KEEP_RELEASES releases: every run (scheduled or manual)
+  # deletes the oldest releases (and their tags) beyond the limit.
+  cleanup-old-releases:
+    needs: [check-version, create-release]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      KEEP_RELEASES: 50
+    steps:
+      - name: Delete releases beyond the keep limit
+        run: |
+          set -e
+          echo "Keeping the newest $KEEP_RELEASES releases"
+          TOTAL=$(gh release list --limit 1000 --json tagName --jq 'length')
+          echo "Current release count: $TOTAL"
+          OLD_TAGS=$(gh release list --limit 1000 --json tagName,createdAt             --jq "sort_by(.createdAt) | reverse | .[$KEEP_RELEASES:] | .[].tagName")
+          if [ -z "$OLD_TAGS" ]; then
+            echo "Nothing to delete (<= $KEEP_RELEASES releases)"
+            exit 0
+          fi
+          for tag in $OLD_TAGS; do
+            echo "Deleting old release: $tag"
+            gh release delete "$tag" --yes --cleanup-tag
+          done
+          REMAINING=$(gh release list --limit 1000 --json tagName --jq 'length')
+          echo "Cleanup done. Remaining releases: $REMAINING"
 
   notify-no-build:
     needs: check-version

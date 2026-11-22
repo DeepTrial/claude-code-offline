@@ -1405,8 +1405,20 @@ download_offline_packages() {
     }
     
     local download_url
-    # Current naming: platform-suffixed asset (matches -windows.zip)
-    download_url=$(echo "$release_info" | grep "browser_download_url.*claude-offline-packages-linux.tar.gz\"" | head -1 | cut -d '"' -f 4)
+    # Select the asset matching this machine's architecture
+    local machine_arch
+    machine_arch=$(uname -m)
+    if [ "$machine_arch" = "aarch64" ] || [ "$machine_arch" = "arm64" ]; then
+        # ARM64: dedicated asset, then fall back to the x64 package with a warning
+        download_url=$(echo "$release_info" | grep "browser_download_url.*claude-offline-packages-linux-arm64.tar.gz\"" | head -1 | cut -d '"' -f 4)
+        if [ -z "$download_url" ]; then
+            log_warn "ARM64 package not found in this release; falling back to the x64 package (requires emulation)"
+        fi
+    fi
+    if [ -z "$download_url" ]; then
+        # Current x64 naming: platform-suffixed asset (matches -windows.zip)
+        download_url=$(echo "$release_info" | grep "browser_download_url.*claude-offline-packages-linux.tar.gz\"" | head -1 | cut -d '"' -f 4)
+    fi
     # Backward compatibility: older releases used the unsuffixed name
     if [ -z "$download_url" ]; then
         download_url=$(echo "$release_info" | grep "browser_download_url.*claude-offline-packages.tar.gz\"" | head -1 | cut -d '"' -f 4)
@@ -2171,7 +2183,9 @@ echo ""
 echo "Step 6b/7: Installing offline skills..."
 
 SKILLS_DIR="${OFFLINE_PACKAGES}/skills"
-if [ -d "$SKILLS_DIR" ] && [ -f "$SKILLS_DIR/install-skills.sh" ]; then
+if [ "${SKIP_SKILLS_INSTALL:-0}" = "1" ]; then
+    log_info "Skipping offline skills installation (SKIP_SKILLS_INSTALL=1)"
+elif [ -d "$SKILLS_DIR" ] && [ -f "$SKILLS_DIR/install-skills.sh" ]; then
     log_info "Found offline skills package"
     echo ""
     echo "Offline skills are plugins that enhance Claude Code's capabilities"

@@ -82,36 +82,47 @@ compare_versions() {
 download_latest() {
     local version="$1"
     local base_url="https://github.com/${GITHUB_REPO}/releases/download/v${version}"
-    local asset_name="claude-offline-packages-linux.tar.gz"
-    local download_url="${base_url}/${asset_name}"
     local output_file="claude-offline-packages-v${version}.tar.gz"
 
-    log_info "Downloading Claude Code v${version}..."
-    log_info "URL: ${download_url}"
-
-    local download_ok=false
-    if command -v wget >/dev/null 2>&1; then
-        wget --progress=bar:force --timeout=60 -O "$output_file" "$download_url" && download_ok=true
-    elif command -v curl >/dev/null 2>&1; then
-        curl -fsSL --progress-bar --max-time 300 -o "$output_file" "$download_url" && download_ok=true
-    else
-        log_error "Neither wget nor curl is available"
-        return 1
-    fi
-
+    # Candidate asset names, best match first:
+    #   aarch64/arm64 -> dedicated ARM64 asset, then x64 (with a warning)
+    #   x64           -> platform-suffixed asset, then legacy unsuffixed name
+    local candidates=()
+    case "$(uname -m)" in
+        aarch64|arm64)
+            candidates+=("claude-offline-packages-linux-arm64.tar.gz")
+            candidates+=("claude-offline-packages-linux.tar.gz")
+            ;;
+        *)
+            candidates+=("claude-offline-packages-linux.tar.gz")
+            ;;
+    esac
     # Backward compatibility: releases before the platform-suffix rename
     # used the unsuffixed asset name.
-    if [ "$download_ok" != true ]; then
-        asset_name="claude-offline-packages.tar.gz"
-        download_url="${base_url}/${asset_name}"
-        log_warn "Platform-suffixed asset not found, trying legacy name..."
+    candidates+=("claude-offline-packages.tar.gz")
+
+    log_info "Downloading Claude Code v${version}..."
+
+    local download_ok=false
+    local asset_name=""
+    local warned_fallback=false
+    for asset_name in "${candidates[@]}"; do
+        local download_url="${base_url}/${asset_name}"
+        if [ "$warned_fallback" = false ] && [ "$asset_name" = "claude-offline-packages-linux.tar.gz" ] \
+            && [ "${candidates[0]}" != "$asset_name" ]; then
+            log_warn "ARM64 asset not available, falling back to the x64 package (requires emulation)"
+            warned_fallback=true
+        fi
         log_info "URL: ${download_url}"
         if command -v wget >/dev/null 2>&1; then
-            wget --progress=bar:force --timeout=60 -O "$output_file" "$download_url" && download_ok=true
+            wget --progress=bar:force --timeout=60 -O "$output_file" "$download_url" && { download_ok=true; break; }
+        elif command -v curl >/dev/null 2>&1; then
+            curl -fsSL --progress-bar --max-time 300 -o "$output_file" "$download_url" && { download_ok=true; break; }
         else
-            curl -fsSL --progress-bar --max-time 300 -o "$output_file" "$download_url" && download_ok=true
+            log_error "Neither wget nor curl is available"
+            return 1
         fi
-    fi
+    done
 
     if [ "$download_ok" != true ]; then
         log_error "Download failed (network unreachable or asset missing)"
